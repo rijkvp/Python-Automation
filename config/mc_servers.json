@@ -1,0 +1,5 @@
+[
+    "example.com",
+    "example-with-port.com:25565",
+    "subdomain.domain.co.uk"
+]
