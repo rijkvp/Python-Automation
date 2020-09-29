@@ -2,8 +2,10 @@ import datetime
 import time
 import requests
 import json
+import os
 from apscheduler.schedulers.blocking import BlockingScheduler
 from plyer import notification
+from datetime import timedelta
 
 sync_delay = 30
 
@@ -57,28 +59,43 @@ def get_access_token():
 
 
 def get_schedule_updates():
-    datum_start = "01/09/2020"
-    datum_stop = "30/09/2020"
-    timestamp_start = time.mktime(datetime.datetime.strptime(
-        datum_start, "%d/%m/%Y").timetuple())
-    timestamp_end = time.mktime(datetime.datetime.strptime(
-        datum_stop, "%d/%m/%Y").timetuple())
-
-    json_response = requests.get(endpoint + "appointments?user="+user_name+"&access_token="+access_token +
-                                 "&start="+str(int(timestamp_start))+"&end="+str(int(timestamp_end))+"&valid=true").json()
-    appointments = json_response['response']['data']
+    today = datetime.date.today()
+    start_date = today
+    end_date = today + timedelta(days=14)
+    timestamp_start = str(int(time.mktime(start_date.timetuple())))
+    timestamp_end = str(int(time.mktime(end_date.timetuple())))
+    json_response = requests.get(endpoint + "appointments?user=" + user_name + "&access_token=" + access_token +
+                                 "&start=" + timestamp_start + "&end="+timestamp_end+"&valid=true").json()
+    appointments_json = json_response['response']['data']
 
     def start_field(appointment):
         return int()
 
-    appointments.sort(key=start_field)
+    appointments_json.sort(key=start_field)
 
-    def time_string(timestamp):
-        return datetime.datetime.fromtimestamp(timestamp).strftime('%H:%M:%S')
+    def time_to_string(timestamp):
+        return datetime.datetime.fromtimestamp(timestamp).strftime('%H:%M')
 
-    for appointment in appointments:
-        print(time_string(appointment['start'])+" "+str(appointment['startTimeSlot'])+" "+",".join(
+    class Appointment:
+        def __init__(self, start, end, start_time_slot, teachers, subjects, locations):
+            self.start = start
+            self.end = end
+            self.start_time_slot = start_time_slot
+            self.teachers = teachers
+            self.subjects = subjects
+            self.locations = locations
+
+    appointments = []
+
+    for appointment in appointments_json:
+        appointments.append(Appointment(time_to_string(appointment['start']), time_to_string(
+            appointment['end']), appointment['startTimeSlot'], appointment['teachers'], appointment['subjects'], appointment['locations']))
+        print(time_to_string(appointment['start']) + " " + time_to_string(appointment['end'])+" "+str(appointment['startTimeSlot'])+" "+",".join(
             appointment['teachers']) + " " + ','.join(appointment['subjects']) + " " + ','.join(appointment['locations']))
+    os.makedirs("data", exist_ok=True)
+    f = open("data/zermelo_appointments.json", "w")
+    f.write(json.dumps([ob.__dict__ for ob in appointments], indent=4))
+    f.close()
 
 
 def update():
