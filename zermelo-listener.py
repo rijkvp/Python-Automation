@@ -6,6 +6,7 @@ import os
 from apscheduler.schedulers.blocking import BlockingScheduler
 from plyer import notification
 from datetime import timedelta
+from deepdiff import DeepDiff
 
 sync_delay = 30
 
@@ -40,6 +41,13 @@ def send_notification(title, body):
 
 def get_access_token():
     global access_token
+
+    if os.path.isfile('data/zermelo_access_token.json'):
+        with open("data/zermelo_access_token.json") as file:
+            json_data = json.loads(file.read()) 
+            access_token = json_data["access_token"] # TODO: Check if the access token hasn't been expired
+            return
+
     data = {"grant_type": "authorization_code", "code": auth_code}
     header = {"Accept": "application/json"}
     token_response = requests.post(
@@ -50,6 +58,14 @@ def get_access_token():
         token_json = json.loads(token_response.text)
         access_token = token_json["access_token"]
         print("Acces token: {}".format(access_token))
+        
+        os.makedirs("data", exist_ok=True)
+        with open("data/zermelo_access_token.json", "w") as file:
+            access_token_json = {
+                "access_token": access_token,
+                "expires": "todo"
+            }
+            file.write(json.dumps(access_token_json))
     else:
         error_msg = "Couldn't authenticate the access token! Make sure the credentials are right!\nSchool code: {0}\nAuth code (without spaces!): {1}".format(
             organization, auth_code)
@@ -66,15 +82,18 @@ def get_schedule_updates():
     timestamp_end = str(int(time.mktime(end_date.timetuple())))
     json_response = requests.get(endpoint + "appointments?user=" + user_name + "&access_token=" + access_token +
                                  "&start=" + timestamp_start + "&end="+timestamp_end+"&valid=true").json()
-    appointments_json = json_response['response']['data']
+    appointment_data = json_response['response']['data']
 
     def start_field(appointment):
         return int()
 
-    appointments_json.sort(key=start_field)
+    appointment_data.sort(key=start_field)
 
-    def time_to_string(timestamp):
-        return datetime.datetime.fromtimestamp(timestamp).strftime('%H:%M')
+    def convert_timestamp(timestamp):
+        return datetime.datetime.fromtimestamp(timestamp)
+
+    def datetime_to_string(date_time):
+        return date_time.strftime("%Y-%m-%dT%H:%M")
 
     class Appointment:
         def __init__(self, start, end, start_time_slot, teachers, subjects, locations):
@@ -87,15 +106,30 @@ def get_schedule_updates():
 
     appointments = []
 
-    for appointment in appointments_json:
-        appointments.append(Appointment(time_to_string(appointment['start']), time_to_string(
+    for appointment in appointment_data:
+        appointments.append(Appointment(convert_timestamp(appointment['start']), convert_timestamp(
             appointment['end']), appointment['startTimeSlot'], appointment['teachers'], appointment['subjects'], appointment['locations']))
-        print(time_to_string(appointment['start']) + " " + time_to_string(appointment['end'])+" "+str(appointment['startTimeSlot'])+" "+",".join(
-            appointment['teachers']) + " " + ','.join(appointment['subjects']) + " " + ','.join(appointment['locations']))
+
+    appointment_json = json.dumps(
+        [ob.__dict__ for ob in appointments], default=datetime_to_string)
+
+    # Load previous data
+    with open("data/zermelo_appointments.json", "r") as f:
+        previous_json = f.read()
+
+    # DeefDiff library calculates difference bewteen previous & new json
+    difference = DeepDiff(json.loads(appointment_json), json.loads(previous_json), view='tree')
+    print("Difference:\n" + str(difference))
+    if "values_changed" in difference:
+        for change in difference["values_changed"]:
+            print("1: " + change.t1 + " 2: " + change.t2);
+            print(change);
+            print(change.up);
+
+    # Save new json
     os.makedirs("data", exist_ok=True)
-    f = open("data/zermelo_appointments.json", "w")
-    f.write(json.dumps([ob.__dict__ for ob in appointments], indent=4))
-    f.close()
+    with open("data/zermelo_appointments.json", "w") as f:
+        f.write(json.dumps([ob.__dict__ for ob in appointments], default=datetime_to_string))
 
 
 def update():
