@@ -20,16 +20,19 @@ auth_code = None
 endpoint = None
 access_token = None
 user_name = None
-
+group_name = None
+group_id = None
 
 def load_credentials():
     global organization
     global auth_code
     global endpoint
     global user_name
+    global group_name
     with open('config/zermelo_credentials.json') as config_file:
         config_json = json.load(config_file)
         user_name = config_json["user_name"]
+        group_name = config_json["group_name"]
         organization = config_json["organization"]
         auth_code = config_json["auth_code"]
     endpoint = "https://{}.zportal.nl/api/v3/".format(organization)
@@ -39,7 +42,7 @@ def send_notification(title, body):
     notification.notify(title, body)
 
 
-def get_access_token():
+def authenticate():
     global access_token
 
     if os.path.isfile('data/zermelo_access_token.json'):
@@ -74,12 +77,42 @@ def get_access_token():
         send_notification("Couldn't Authenticate!", error_msg)
 
 
+def convert_timestamp(timestamp):
+    return datetime.datetime.fromtimestamp(timestamp)
+
+def datetime_to_string(date_time):
+    return date_time.strftime("%Y-%m-%dT%H:%M")
+
+def get_group_id():
+    global group_id
+
+    groups_response = requests.get(endpoint + "groupindepartments?access_token=" + access_token)
+    groups_json = groups_response.json()['response']['data']
+
+    with open("data/zermelo_groups_dump.json", "w+") as f:
+        f.write(json.dumps(groups_json, default=datetime_to_string))
+
+    for item in groups_json:
+        if item["name"] == group_name:
+            group_id = item["id"]
+            break
+    
+    if group_id is not None:
+        print("FOUND GROUP ID: " + str(group_id))
+    else:
+        # TODO: Hanle errors 
+        print("Couldn't find the group id!")
+
+
 def get_schedule_updates():
+    print("SKIP UPDATING")
+    return
     today = datetime.date.today()
     start_date = today
     end_date = today + timedelta(days=14)
     timestamp_start = str(int(time.mktime(start_date.timetuple())))
     timestamp_end = str(int(time.mktime(end_date.timetuple())))
+
     json_response = requests.get(endpoint + "appointments?user=" + user_name + "&access_token=" + access_token +
                                  "&start=" + timestamp_start + "&end="+timestamp_end+"&valid=true").json()
     appointment_data = json_response['response']['data']
@@ -89,11 +122,6 @@ def get_schedule_updates():
 
     appointment_data.sort(key=start_field)
 
-    def convert_timestamp(timestamp):
-        return datetime.datetime.fromtimestamp(timestamp)
-
-    def datetime_to_string(date_time):
-        return date_time.strftime("%Y-%m-%dT%H:%M")
 
     class Appointment:
         def __init__(self, start, end, start_time_slot, teachers, subjects, locations):
@@ -114,7 +142,7 @@ def get_schedule_updates():
         [ob.__dict__ for ob in appointments], default=datetime_to_string)
 
     # Load previous data
-    with open("data/zermelo_appointments.json", "r") as f:
+    with open("data/zermelo_appointments.json", "w+") as f:
         previous_json = f.read()
 
     # DeefDiff library calculates difference bewteen previous & new json
@@ -128,7 +156,7 @@ def get_schedule_updates():
 
     # Save new json
     os.makedirs("data", exist_ok=True)
-    with open("data/zermelo_appointments.json", "w") as f:
+    with open("data/zermelo_appointments.json", "w+") as f:
         f.write(json.dumps([ob.__dict__ for ob in appointments], default=datetime_to_string))
 
 
@@ -145,15 +173,19 @@ def update():
 
     # Then, receive the acces token if not already done
     if access_token is None:
-        get_access_token()
+        authenticate()
+
+    if group_id is None:
+        get_group_id()
 
     # Finally, get the schedule updates
     if access_token is not None:
         get_schedule_updates()
 
 
-scheduler = BlockingScheduler()
-scheduler.add_job(update, "interval", seconds=sync_delay)
-print("Updating schedule information every " +
-      str(sync_delay) + " seconds..")
-scheduler.start()
+# scheduler = BlockingScheduler()
+# scheduler.add_job(update, "interval", seconds=sync_delay)
+# print("Updating schedule information every " +
+#       str(sync_delay) + " seconds..")
+# scheduler.start()
+update()
