@@ -6,7 +6,6 @@ import os
 from apscheduler.schedulers.blocking import BlockingScheduler
 from plyer import notification
 from datetime import timedelta
-from deepdiff import DeepDiff
 
 sync_delay = 30
 
@@ -89,11 +88,12 @@ def get_group_id():
     groups_response = requests.get(endpoint + "groupindepartments?access_token=" + access_token)
     groups_json = groups_response.json()['response']['data']
 
+    os.makedirs("data", exist_ok=True)
     with open("data/zermelo_groups_dump.json", "w+") as f:
         f.write(json.dumps(groups_json, default=datetime_to_string))
 
     for item in groups_json:
-        if item["name"] == group_name:
+        if item["name"] == group_name and item["isMentorGroup"]:
             group_id = item["id"]
             break
     
@@ -105,17 +105,18 @@ def get_group_id():
 
 
 def get_schedule_updates():
-    print("SKIP UPDATING")
-    return
     today = datetime.date.today()
     start_date = today
     end_date = today + timedelta(days=14)
     timestamp_start = str(int(time.mktime(start_date.timetuple())))
     timestamp_end = str(int(time.mktime(end_date.timetuple())))
+                                
+    appointment_response = requests.get(endpoint + "appointments?access_token=" + access_token +
+                                "&start=" + timestamp_start + "&end="+timestamp_end+"&valid=true" + "&containsStudentsFromGroupInDepartment=" + str(group_id))
 
-    json_response = requests.get(endpoint + "appointments?user=" + user_name + "&access_token=" + access_token +
-                                 "&start=" + timestamp_start + "&end="+timestamp_end+"&valid=true").json()
-    appointment_data = json_response['response']['data']
+    # TODO: Error handling
+
+    appointment_data = appointment_response.json()['response']['data']
 
     def start_field(appointment):
         return int()
@@ -138,24 +139,24 @@ def get_schedule_updates():
         appointments.append(Appointment(convert_timestamp(appointment['start']), convert_timestamp(
             appointment['end']), appointment['startTimeSlot'], appointment['teachers'], appointment['subjects'], appointment['locations']))
 
-    appointment_json = json.dumps(
-        [ob.__dict__ for ob in appointments], default=datetime_to_string)
 
-    # Load previous data
-    with open("data/zermelo_appointments.json", "w+") as f:
-        previous_json = f.read()
+    # Compare
+    if os.path.exists("data/zermelo_appointments.json"):
+        os.makedirs("data", exist_ok=True)
+        previous_appointments = []
+        with open("data/zermelo_appointments.json", "r") as f:
+            previous_json = f.read()
+        for a in previous_json:
+            previous_appointments.append(Appointment(a["start"], a["end"], a["start_time_slot"], a["teachers"], a["subjects"], a["locations"]))
+        
+        print("\n\n\nPREVIOUS: " + previous_appointments)
+        print("\n\n\nNEW: " + appointments)
 
-    # DeefDiff library calculates difference bewteen previous & new json
-    difference = DeepDiff(json.loads(appointment_json), json.loads(previous_json), view='tree')
-    print("Difference:\n" + str(difference))
-    if "values_changed" in difference:
-        for change in difference["values_changed"]:
-            print("1: " + change.t1 + " 2: " + change.t2);
-            print(change);
-            print(change.up);
 
     # Save new json
     os.makedirs("data", exist_ok=True)
+    appointment_json = json.dumps(
+        [ob.__dict__ for ob in appointments], default=datetime_to_string)
     with open("data/zermelo_appointments.json", "w+") as f:
         f.write(json.dumps([ob.__dict__ for ob in appointments], default=datetime_to_string))
 
