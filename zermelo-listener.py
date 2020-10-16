@@ -6,6 +6,7 @@ import os
 from apscheduler.schedulers.blocking import BlockingScheduler
 from plyer import notification
 from datetime import timedelta
+import operator
 
 sync_delay = 30
 
@@ -79,6 +80,9 @@ def convert_timestamp(timestamp):
 def datetime_to_string(date_time):
     return date_time.strftime("%Y-%m-%dT%H:%M")
 
+def string_to_datetime(string):
+    return datetime.datetime.strptime(string, "%Y-%m-%dT%H:%M")
+
 def get_group_id():
     global group_id
 
@@ -95,7 +99,7 @@ def get_group_id():
             break
     
     if group_id is not None:
-        print("FOUND GROUP ID: " + str(group_id))
+        print("Group ID ({}): {}".format(group_name, group_id))
     else:
         # TODO: Hanle errors 
         print("Couldn't find the group id!")
@@ -115,48 +119,66 @@ def get_schedule_updates():
 
     appointment_data = appointment_response.json()['response']['data']
 
-    def start_field(appointment):
-        return int()
-
-    appointment_data.sort(key=start_field)
-
-
     class Appointment:
-        def __init__(self, start, end, start_time_slot, teachers, subjects, locations):
+        def __init__(self, start: datetime.datetime, end: datetime.datetime, start_time_slot: int, teachers, subjects, locations):
             self.start = start
             self.end = end
             self.start_time_slot = start_time_slot
             self.teachers = teachers
             self.subjects = subjects
             self.locations = locations
+            
+        def __eq__(self, obj):
+            return self.start == obj.start and self.end == obj.end and self.start_time_slot == obj.start_time_slot and self.teachers == obj.teachers and self.subjects == obj.subjects and self.locations == obj.locations
+        
+        def __lt__(self, other):
+            return self.start < other.start
+
+        def as_dict(self):
+            return {
+                "start": datetime_to_string(self.start),
+                "end": datetime_to_string(self.end),
+                "start_time_slot": str(self.start_time_slot),
+                "teachers": list(self.teachers),
+                "subjects": list(self.subjects),
+                "locations": list(self.locations),
+            }
 
     appointments = []
 
     for appointment in appointment_data:
         appointments.append(Appointment(convert_timestamp(appointment['start']), convert_timestamp(
-            appointment['end']), appointment['startTimeSlot'], appointment['teachers'], appointment['subjects'], appointment['locations']))
+            appointment['end']), int(appointment['startTimeSlot']), set(appointment['teachers']), set(appointment['subjects']), set(appointment['locations'])))
 
+    appointments = sorted(appointments)
 
     # Compare
     if os.path.exists("data/zermelo_appointments.json"):
         os.makedirs("data", exist_ok=True)
         previous_appointments = []
         with open("data/zermelo_appointments.json", "r") as f:
-            previous_json = f.read()
-        for a in previous_json:
-            previous_appointments.append(Appointment(a["start"], a["end"], a["start_time_slot"], a["teachers"], a["subjects"], a["locations"]))
+            previous_json = json.loads(f.read())
+        for appointment in previous_json:
+            previous_appointments.append(Appointment(string_to_datetime(appointment['start']), string_to_datetime(
+            appointment['end']), int(appointment['start_time_slot']), set(appointment['teachers']), set(appointment['subjects']), set(appointment['locations'])))
         
-        print("\n\n\nPREVIOUS: " + previous_appointments)
-        print("\n\n\nNEW: " + appointments)
-
+        
+        for new_appt in appointments:
+            if new_appt not in previous_appointments:
+                print("NEW APPOINTMENT!")
+                # TODO: Nice and useful message
+        
+        for old_appt in previous_appointments:
+            if old_appt not in appointments:
+                print("REMOVED APPOINTMENT!")
+                # TODO: Nice and useful message
 
     # Save new json
     os.makedirs("data", exist_ok=True)
     appointment_json = json.dumps(
-        [ob.__dict__ for ob in appointments], default=datetime_to_string)
+        [a.as_dict() for a in appointments])
     with open("data/zermelo_appointments.json", "w+") as f:
-        f.write(json.dumps([ob.__dict__ for ob in appointments], default=datetime_to_string))
-
+        f.write(appointment_json)
 
 def update():
     # Load user config - credentials
