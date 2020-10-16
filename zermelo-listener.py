@@ -18,7 +18,6 @@ organization = None
 auth_code = None
 endpoint = None
 access_token = None
-user_name = None
 group_name = None
 group_id = None
 
@@ -26,11 +25,9 @@ def load_credentials():
     global organization
     global auth_code
     global endpoint
-    global user_name
     global group_name
     with open('config/zermelo_credentials.json') as config_file:
         config_json = json.load(config_file)
-        user_name = config_json["user_name"]
         group_name = config_json["group_name"]
         organization = config_json["organization"]
         auth_code = config_json["auth_code"]
