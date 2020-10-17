@@ -4,6 +4,7 @@ import json
 import datetime
 
 send_os_notifications = False
+send_discord_messages = False
 discord_tts = False
 discord_webhooks = []
 
@@ -15,20 +16,25 @@ class DiscordWebhook:
         self.avatar_url = avatar_url
         self.webhook_urls = webhook_urls
 
-
 with open("config/notification_settings.json") as config_file:
     config_json = json.load(config_file)
     send_os_notifications = config_json["send_os_notifications"]
+    send_discord_messages = config_json["send_discord_messages"]
     discord_tts = config_json["discord_tts"]
     discord_webhooks_json = config_json["discord_webhooks"]
     for disc_wh in discord_webhooks_json:
         discord_webhooks.append(DiscordWebhook(disc_wh["name"], disc_wh["username"], disc_wh["message"], disc_wh["avatar_url"], disc_wh["webhook_urls"]))
 
-def send_os_notification(title, body):
-    # Send OS notification using plyer package
-    plyer.notification.notify(title, body)
+# Send an OS notification using plyer package
+def send_os_notification(title, message, context_name):
+    if not send_os_notifications:
+        return
 
-def send_discord_webhook(title, body, fields, webhook_name):
+    plyer.notification.notify(title=title, message=message, app_name=context_name, app_icon="config/notification_icon.ico")
+
+def send_discord_message(title, fields, webhook_name):
+    if not send_discord_messages:
+        return
     for disc_wh in discord_webhooks:
         if disc_wh.name == webhook_name:
             for webhook_url in disc_wh.webhook_urls:
@@ -52,7 +58,6 @@ def send_discord_webhook(title, body, fields, webhook_name):
                     "embeds": [
                         {
                             "title": title,
-                            "description": body,
                             "fields": embed_fields,
                             "color": 15158332,
                             "timestamp": timestamp
@@ -71,22 +76,25 @@ def send_discord_webhook(title, body, fields, webhook_name):
                         print(response.status_code)
                         print(response.reason)
                         print(response.text)
-            break
-    
 
-def notify(title, body, fields, webhook_name):
+def fields_to_sring(fields):
+    string = ""
+    for name, value in fields.items():
+        string += str(name) + ": " + str(value)
+    return string
+
+def notify(title, fields, context_name):
     print("\n[CONSOLE MESSAGE]")
     print(title)
-    print(body)
-    print("\n")
+    message = fields_to_sring(fields)
+    print(message)
 
-    send_discord_webhook(title, body, fields, webhook_name)
-    send_os_notification(title, body)
+    send_discord_message(title, fields, context_name)
+    send_os_notification(title, message, context_name)
 
-def notify_error(title, body):
+def notify_error(title, message):
     print("\n[CONSOLE ERROR MESSAGE]")
     print(title)
-    print(body)
-    print("\n")
+    print(message)
 
-    send_os_notification(title, body)
+    send_os_notification(title, message, "Error")
