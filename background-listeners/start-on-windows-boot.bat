@@ -29,7 +29,7 @@ if '%errorlevel%' NEQ '0' (
     pushd "%CD%"
     CD /D "%~dp0"
 :--------------------------------------  
-set mypath="C:\ProgramData\Microsoft\Windows\Start Menu\Programs\StartUp\start-python-scripts.bat"
+set mypath="C:\ProgramData\Microsoft\Windows\Start Menu\Programs\StartUp\start-python-listeners.bat"
 
 echo @echo off > %mypath%
 echo cd %CD% >> %mypath%

@@ -1,0 +1,13 @@
+{
+    "send_os_notifications": true,
+    "discord_tts": false,
+    "discord_webhooks": [
+        {
+            "name": "zermelo",
+            "message": "There are schedule changes:",
+            "username": "Zermelo Webhook",
+            "avatar_url": "your url here",
+            "webhook_urls": ["your urls here"]
+        }
+    ]
+}

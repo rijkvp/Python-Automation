@@ -4,9 +4,20 @@ import requests
 import json
 import os
 from apscheduler.schedulers.blocking import BlockingScheduler
-from plyer import notification
 from datetime import timedelta
 import operator
+import notifier
+
+# The dutch weekday abbreviations
+WEEKDAY_ABBREVIATIONS = {
+    0: "Ma",
+    1: "Di",
+    2: "Wo",
+    3: "Do",
+    4: "Vr",
+    5: "Za",
+    6: "Zo"
+}
 
 sync_delay = 30
 
@@ -34,10 +45,39 @@ def load_credentials():
         auth_code = config_json["auth_code"]
     endpoint = "https://{}.zportal.nl/api/v3/".format(organization)
 
+def new_appointment(appointment):
+    with open('config/subjects.json') as file:
+        subject_list = json.loads(file.read())
+    with open('config/teachers.json') as file:
+        teacher_list = json.loads(file.read())
+    
+    subject_short = ', '.join(appointment.subjects)
+    if subject_short in subject_list:
+        subject_name = subject_list[subject_short]
+    else:
+        subject_name = subject_short.upper()
 
-def send_notification(title, body):
-    notification.notify(title, body)
+    teacher_short = ', '.join(appointment.teachers)
+    if teacher_short in teacher_list:
+        teacher_name = teacher_list[teacher_short]
+    else:
+        teacher_name = teacher_short.upper()
+    location = ', '.join(appointment.locations)
+    weekday = WEEKDAY_ABBREVIATIONS[appointment.start.weekday()]
+    fields = {
+        "Vak": subject_name,
+        "Docent": teacher_name,
+        "Lokaal": location,
+        "Lesuur": appointment.start_time_slot,
+        "Datum": weekday + " " + appointment.start.strftime("%d-%m"),
+        "Tijd": appointment.start.strftime("%H:%M") + " - " + appointment.end.strftime("%H:%M")
+    }
+    notifier.notify("__{}__ is toegevoegd/verplaatst".format(subject_name), "", fields, "zermelo")
 
+def changed_appointment(old, new):
+    # TODO Detect change
+    # TODO Send nice message about change
+    # notifier.notify("__{}__ is aangepast", "desc", "" "zermelo")
 
 def authenticate():
     global access_token
@@ -71,7 +111,7 @@ def authenticate():
             organization, auth_code)
 
         print(error_msg)
-        send_notification("Couldn't Authenticate!", error_msg)
+        notifier.notify_error("Couldn't Authenticate!", error_msg)
 
 
 def convert_timestamp(timestamp):
@@ -111,7 +151,8 @@ def get_schedule_updates():
     end_date = today + timedelta(days=14)
     timestamp_start = str(int(time.mktime(start_date.timetuple())))
     timestamp_end = str(int(time.mktime(end_date.timetuple())))
-                                
+    
+
     appointment_response = requests.get(endpoint + "appointments?access_token=" + access_token +
                                 "&start=" + timestamp_start + "&end="+timestamp_end+"&valid=true" + "&containsStudentsFromGroupInDepartment=" + str(group_id))
 
@@ -120,14 +161,15 @@ def get_schedule_updates():
     appointment_data = appointment_response.json()['response']['data']
 
     class Appointment:
-        def __init__(self, start: datetime.datetime, end: datetime.datetime, start_time_slot: int, teachers, subjects, locations):
+        def __init__(self, id, start: datetime.datetime, end: datetime.datetime, start_time_slot: int, teachers, subjects, locations):
+            self.id = id
             self.start = start
             self.end = end
             self.start_time_slot = start_time_slot
             self.teachers = teachers
             self.subjects = subjects
             self.locations = locations
-            
+
         def __eq__(self, obj):
             return self.start == obj.start and self.end == obj.end and self.start_time_slot == obj.start_time_slot and self.teachers == obj.teachers and self.subjects == obj.subjects and self.locations == obj.locations
         
@@ -136,6 +178,7 @@ def get_schedule_updates():
 
         def as_dict(self):
             return {
+                "id": str(self.id),
                 "start": datetime_to_string(self.start),
                 "end": datetime_to_string(self.end),
                 "start_time_slot": str(self.start_time_slot),
@@ -147,31 +190,37 @@ def get_schedule_updates():
     appointments = []
 
     for appointment in appointment_data:
-        appointments.append(Appointment(convert_timestamp(appointment['start']), convert_timestamp(
+        appointments.append(Appointment(int(appointment["id"]), convert_timestamp(appointment['start']), convert_timestamp(
             appointment['end']), int(appointment['startTimeSlot']), set(appointment['teachers']), set(appointment['subjects']), set(appointment['locations'])))
 
     appointments = sorted(appointments)
 
-    # Compare
+    # Compare and detect changes
     if os.path.exists("data/zermelo_appointments.json"):
         os.makedirs("data", exist_ok=True)
         previous_appointments = []
         with open("data/zermelo_appointments.json", "r") as f:
             previous_json = json.loads(f.read())
+
+
         for appointment in previous_json:
-            previous_appointments.append(Appointment(string_to_datetime(appointment['start']), string_to_datetime(
+            previous_appointments.append(Appointment(int(appointment["id"]), string_to_datetime(appointment['start']), string_to_datetime(
             appointment['end']), int(appointment['start_time_slot']), set(appointment['teachers']), set(appointment['subjects']), set(appointment['locations'])))
-        
-        
+
         for new_appt in appointments:
-            if new_appt not in previous_appointments:
-                print("NEW APPOINTMENT!")
-                # TODO: Nice and useful message
+            found_id = False
+            old_appt = None
+            for appt in previous_appointments:
+                if appt.id == new_appt.id:
+                    found_id = True
+                    old_appt = appt
+                    break
+            
+            if not found_id:
+                new_appointment(new_appt)
         
-        for old_appt in previous_appointments:
-            if old_appt not in appointments:
-                print("REMOVED APPOINTMENT!")
-                # TODO: Nice and useful message
+            if found_id and new_appt not in previous_appointments:
+                changed_appointment(new_appt, old_appt)
 
     # Save new json
     os.makedirs("data", exist_ok=True)
