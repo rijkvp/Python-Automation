@@ -3,6 +3,7 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 from plyer import notification
 from threading import Thread
 import json
+import notifier
 
 sync_delay = 30
 
@@ -26,9 +27,8 @@ with open('config/mc_servers.json') as config_file:
         servers.append(ServerInfo(server_ip))
 
 
-def send_notification(title, body):
-    notification.notify(title, body)
-
+def send_notification(title, fields):
+    notifier.notify(title, fields, "Minecraft")
 
 def ping_servers():
     for server_info in servers:
@@ -37,8 +37,11 @@ def ping_servers():
             status = server.status()
         except:
             if server_info.is_online:
-                send_notification("Server Offline", "The server {0} is no longer online!".format(
-                    server_info.ip))
+                notification_fields = {
+                    "IP": server_info.ip,
+                    "Status": "Offline"
+                }
+                send_notification(server_info.ip + " is offline", notification_fields)
                 server_info.is_online = False
             continue
 
@@ -46,19 +49,28 @@ def ping_servers():
         ping = int(round(status.latency))
 
         if not server_info.is_online:
-            send_notification("Server Online", "The server {0} is now online with {1} players! ({2} ms)".format(
-                server_info.ip, player_count, ping))
+            notification_fields = {
+                "IP": server_info.ip,
+                "Status": "Online",
+                "Players": server_info.player_count,
+                "Ping": ping
+            }
+            send_notification(server_info.ip + " is online", notification_fields)
             server_info.is_online = True
             server_info.player_count = player_count
 
         if player_count != server_info.player_count:
             diff = player_count - server_info.player_count
+            notification_fields = {
+                "IP": server_info.ip,
+                "Status": "Online",
+                "Players": server_info.player_count,
+                "Ping": ping
+            }
             if diff > 0:
-                send_notification("Players Joined", "There is/are {0} player(s) online on {1} ({2} ms)".format(
-                    player_count, server_info.ip, ping))
+                send_notification("Player(s) joined", notification_fields)
             elif diff < 0:
-                send_notification("Players Left", "There is/are {0} player(s) online on {1} ({2} ms)".format(
-                    player_count, server_info.ip, ping))
+                send_notification("Player(s) left", notification_fields)
             server_info.player_count = player_count
 
 
