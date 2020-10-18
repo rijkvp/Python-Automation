@@ -151,6 +151,12 @@ def get_group_id():
     global group_id
 
     groups_response = requests.get(endpoint + "groupindepartments?access_token=" + access_token)
+
+    if not groups_response.ok:
+        notifier.notify_error("{} {} - failed to get groups".format(groups_response.status_code, groups_response.reason), 
+        "Response: '{}'".format(groups_response.text))
+        return
+
     groups_json = groups_response.json()['response']['data']
 
     os.makedirs("data", exist_ok=True)
@@ -165,8 +171,7 @@ def get_group_id():
     if group_id is not None:
         print("Group ID ({}): {}".format(group_name, group_id))
     else:
-        # TODO: Hanle errors 
-        print("Couldn't find the group id!")
+        notifier.notify_error("Couldn't find the group id!", "Failed to find the group id with group name: {}".format(group_name))
 
 
 def get_schedule_updates():
@@ -179,7 +184,10 @@ def get_schedule_updates():
     appointment_response = requests.get(endpoint + "appointments?access_token=" + access_token +
                                 "&start=" + timestamp_start + "&end="+timestamp_end+"&valid=true" + "&containsStudentsFromGroupInDepartment=" + str(group_id))
 
-    # TODO: Error handling
+    if not appointment_response.ok:
+        notifier.notify_error("{} {} - failed to get appointments".format(appointment_response.status_code, appointment_response.reason), 
+        "Response: '{}'".format(appointment_response.text))
+        return
 
     appointment_data = appointment_response.json()['response']['data']
 
@@ -294,8 +302,8 @@ def update():
     # First, make sure the portal is online
     portal_status = requests.get(endpoint + "status/status_message")
     if not portal_status.ok:
-        print("Couldn't connect to the portal. Endpoint: {0}, Status: {1}, Message: {2}".format(
-            endpoint, portal_status.status_code, portal_status.text))
+        notifier.notify_error("Portal is offline", 
+        "{} - {}\n{}\nEndpoint: {}".format(portal_status.status_code, portal_status.reason, portal_status.text, endpoint))
         return
 
     # Then, receive the acces token if not already done
@@ -306,7 +314,8 @@ def update():
     if access_token is not None:
         if group_id is None:
             get_group_id()
-        get_schedule_updates()
+        if group_id is not None:
+            get_schedule_updates()
 
 
 scheduler = BlockingScheduler()

@@ -2,6 +2,7 @@ import plyer
 import requests
 import json
 import datetime
+import textwrap
 
 send_os_notifications = False
 send_discord_messages = False
@@ -25,12 +26,16 @@ with open("config/notification_settings.json") as config_file:
     for disc_wh in discord_webhooks_json:
         discord_webhooks.append(DiscordWebhook(disc_wh["name"], disc_wh["username"], disc_wh["message"], disc_wh["avatar_url"], disc_wh["webhook_urls"]))
 
+def validate_text(string, max_length):
+    return textwrap.shorten(string, width=max_length, placeholder="...")
+
 # Send an OS notification using plyer package
 def send_os_notification(title, message, context_name):
     if not send_os_notifications:
         return
-
-    plyer.notification.notify(title=title, message=message, app_name=context_name, app_icon="config/notification_icon.ico")
+    title_short = validate_text(title, 64)
+    message_short = validate_text(message, 64)
+    plyer.notification.notify(title=title_short, message=message_short, app_name=context_name, app_icon="config/notification_icon.ico")
 
 def send_discord_message(title, fields, webhook_name):
     if not send_discord_messages:
