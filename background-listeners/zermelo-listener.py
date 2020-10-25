@@ -235,8 +235,10 @@ def get_schedule_updates():
         if os.path.exists("data/zermelo_known_dates.json"):
             with open("data/zermelo_known_dates.json", "r") as f:
                 known_dates_json = json.loads(f.read())
-            for date in known_dates_json:
-                known_dates.append(string_to_date(date))
+            for date_json in known_dates_json:
+                date = string_to_date(date_json)
+                if date >= today:
+                    known_dates.append(date)
 
         previous_appointments = []
         with open("data/zermelo_appointments.json", "r") as f:
@@ -270,7 +272,7 @@ def get_schedule_updates():
                 if old_appt.id == new_appt.id:
                     found_id = True
                     break
-            if not found_id:
+            if not found_id and old_appt.start.date() in known_dates:
                 found_changes = True
                 removed_appointment(old_appt)
 
