@@ -122,6 +122,12 @@ def authenticate():
                 "expiration_time": datetime_to_string(expiration_time)
             }
             file.write(json.dumps(access_token_json))
+    elif token_response.status_code == 400:
+        access_token = None
+        expiration_time = None
+        error_title = "Failed to authenticate!"
+        error_msg = "Invalid credentials, make sure your auth code & organization are correct and valid."
+        notifier.notify_error(error_title, error_msg)
     else:
         access_token = None
         expiration_time = None
