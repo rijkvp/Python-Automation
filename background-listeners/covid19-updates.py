@@ -35,7 +35,7 @@ def get_updates():
             new_deaths = data_json["countrydata"][0]["total_new_deaths_today"]
 
             fields = {
-                "Nieuwe besmettingen": f'{new_cases:n}' + " :face_vomiting:",
+                "Nieuwe besmettingen": f'{new_cases:n}',
                 "Nieuwe doden": f'{new_deaths:n}' + " :skull_crossbones:",
                 "Datum": today.strftime('%x'),
             }
