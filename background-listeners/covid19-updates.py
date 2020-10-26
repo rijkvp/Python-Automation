@@ -20,7 +20,8 @@ if os.path.exists("data/covid19_update_dates.json"):
 
 def get_updates():
     today = datetime.date.today()
-    if today not in update_dates:
+    hour = datetime.datetime.now().hour
+    if today not in update_dates and hour >= 14:
         data_response = requests.get(
             "https://api.thevirustracker.com/free-api?countryTotal=NL")
         if data_response.ok:
