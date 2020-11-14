@@ -96,11 +96,14 @@ def authenticate():
             json_data = json.loads(file.read()) 
             access_token = json_data["access_token"]
             expiration_time = string_to_datetime(json_data["expiration_time"])
-            if expiration_time < datetime.datetime.now():
-                print("Access token is expired - getting new..")
-            else:
-                print("Found valid access token.")
-                return
+            # Testing: Don't check
+            # if expiration_time < datetime.datetime.now():
+            #     print("Access token is expired - getting new..")
+            # else:
+            #     print("Found valid access token.")
+            #     return
+            print("Skipped checking token expiration!")
+            return
 
     data = {"grant_type": "authorization_code", "code": auth_code}
     header = {"Accept": "application/json"}
@@ -227,8 +230,8 @@ def get_schedule_updates():
     appointments = []
 
     for appointment in appointment_data:
-        appointments.append(Appointment(int(appointment["id"]), convert_timestamp(appointment['start']), convert_timestamp(
-            appointment['end']), int(appointment['startTimeSlot']), set(appointment['teachers']), set(appointment['subjects']), set(appointment['locations'])))
+        appointments.append(Appointment(appointment["id"], convert_timestamp(appointment['start']), convert_timestamp(
+            appointment['end']), appointment['startTimeSlot'], set(appointment['teachers']), set(appointment['subjects']), set(appointment['locations'])))
 
     appointments = sorted(appointments)
     known_dates = []
@@ -251,8 +254,12 @@ def get_schedule_updates():
             previous_json = json.loads(f.read())
 
         for appointment in previous_json:
+            if 'startTimeSlot' in appointment:
+                start_time_slot = appointment['startTimeSlot']
+            else:
+                start_time_slot = None
             previous_appointments.append(Appointment(int(appointment["id"]), string_to_datetime(appointment['start']), string_to_datetime(
-            appointment['end']), int(appointment['start_time_slot']), set(appointment['teachers']), set(appointment['subjects']), set(appointment['locations'])))
+            appointment['end']), start_time_slot, set(appointment['teachers']), set(appointment['subjects']), set(appointment['locations'])))
 
         for new_appt in appointments:
             found_id = False
@@ -326,6 +333,7 @@ def update():
             get_schedule_updates()
 
 
+update()
 scheduler = BlockingScheduler()
 scheduler.add_job(update, "interval", seconds=sync_delay)
 print("Updating schedule changes every " +
