@@ -19,7 +19,7 @@ WEEKDAY_ABBREVIATIONS = {
     6: "Zo"
 }
 
-FETCH_DAYS = 7 # Delete known days when decreasing the ammount
+FETCH_DAYS = 10 # Delete known days when decreasing the ammount
 sync_delay = 30
 
 with open('config/settings.json') as settings_file:
@@ -30,18 +30,18 @@ organization = None
 auth_code = None
 endpoint = None
 access_token = None
-group_name = None
-group_id = None
+group_names = None
+group_ids = None
 expiration_time = None
 
 def load_credentials():
     global organization
     global auth_code
     global endpoint
-    global group_name
+    global group_names
     with open('config/zermelo_credentials.json') as config_file:
         config_json = json.load(config_file)
-        group_name = config_json["group_name"]
+        group_names = config_json["group_names"]
         organization = config_json["organization"]
         auth_code = config_json["auth_code"].replace(" ", "") # Remove the spaces from code (useful for copying)
     endpoint = "https://{}.zportal.nl/api/v3/".format(organization)
@@ -156,8 +156,8 @@ def string_to_datetime(string):
 def string_to_date(string):
     return datetime.datetime.strptime(string, "%Y-%m-%d").date()
 
-def get_group_id():
-    global group_id
+def get_group_ids():
+    global group_ids
 
     groups_response = requests.get(endpoint + "groupindepartments?access_token=" + access_token)
 
@@ -172,46 +172,34 @@ def get_group_id():
     with open("data/zermelo_groups_dump.json", "w+") as f:
         f.write(json.dumps(groups_json, default=datetime_to_string))
 
+    group_ids = []
+    found_group_names = []
     for item in groups_json:
-        if item["name"] == group_name and item["isMentorGroup"]:
-            group_id = item["id"]
-            break
-    
-    if group_id is not None:
-        print("Group ID ({}): {}".format(group_name, group_id))
+        for group_name in group_names:
+            if group_name in found_group_names: # Only use the first group id found
+                continue
+            if item["name"] == group_name and item["isMentorGroup"] and item["isMainGroup"]:
+                group_ids.append(item["id"])
+                found_group_names.append(group_name)
+
+    if len(group_ids) > 0:
+        print("Group IDs: {}".format(group_ids))
     else:
-        notifier.notify_error("Couldn't find the group id!", "Failed to find the group id with group name: {}".format(group_name))
+        notifier.notify_error("Couldn't find the group IS(s)!", "Groups names: {}".format(group_names))
 
-
-def get_schedule_updates():
-    today = datetime.date.today()
-    start_date = today
-    end_date = today + timedelta(days=FETCH_DAYS)
-    timestamp_start = str(int(time.mktime(start_date.timetuple())))
-    timestamp_end = str(int(time.mktime(end_date.timetuple())))
-    
-    appointment_response = requests.get(endpoint + "appointments?access_token=" + access_token +
-                                "&start=" + timestamp_start + "&end="+timestamp_end+"&valid=true" + "&containsStudentsFromGroupInDepartment=" + str(group_id))
-
-    if not appointment_response.ok:
-        notifier.notify_error("{} {} - failed to get appointments".format(appointment_response.status_code, appointment_response.reason), 
-        "Response: '{}'".format(appointment_response.text))
-        return
-
-    appointment_data = appointment_response.json()['response']['data']
-
-    class Appointment:
-        def __init__(self, id, start: datetime.datetime, end: datetime.datetime, start_time_slot: int, teachers, subjects, locations):
+class Appointment:
+        def __init__(self, id, start: datetime.datetime, end: datetime.datetime, start_time_slot, end_time_slot, teachers, subjects, locations):
             self.id = id
             self.start = start
             self.end = end
-            self.start_time_slot = start_time_slot
+            self.start_time_slot = start_time_slot # Int or None
+            self.end_time_slot = end_time_slot # Int or None
             self.teachers = teachers
             self.subjects = subjects
             self.locations = locations
 
         def __eq__(self, obj):
-            return self.start == obj.start and self.end == obj.end and self.start_time_slot == obj.start_time_slot and self.teachers == obj.teachers and self.subjects == obj.subjects and self.locations == obj.locations
+            return self.start == obj.start and self.end == obj.end and self.teachers == obj.teachers and self.subjects == obj.subjects and self.locations == obj.locations
         
         def __lt__(self, other):
             return self.start < other.start
@@ -222,21 +210,54 @@ def get_schedule_updates():
                 "start": datetime_to_string(self.start),
                 "end": datetime_to_string(self.end),
                 "start_time_slot": str(self.start_time_slot),
+                "end_time_slot": str(self.end_time_slot),
                 "teachers": list(self.teachers),
                 "subjects": list(self.subjects),
                 "locations": list(self.locations),
             }
 
+def get_appointments(group_id, timestamp_start, timestamp_end):
     appointments = []
+    appointment_response = requests.get(endpoint + "appointments?access_token=" + access_token +
+                                "&start=" + timestamp_start + "&end="+timestamp_end+"&valid=true" + "&containsStudentsFromGroupInDepartment=" + str(group_id))
+
+    if not appointment_response.ok:
+        notifier.notify_error("{} {} - failed to get appointments!".format(appointment_response.status_code, appointment_response.reason), 
+        "Group ID: {}, Response: '{}'".format(group_id, appointment_response.text))
+        return
+
+    appointment_data = appointment_response.json()['response']['data']
 
     for appointment in appointment_data:
         appointments.append(Appointment(appointment["id"], convert_timestamp(appointment['start']), convert_timestamp(
-            appointment['end']), appointment['startTimeSlot'], set(appointment['teachers']), set(appointment['subjects']), set(appointment['locations'])))
+        appointment['end']), appointment['startTimeSlot'], appointment['endTimeSlot'], set(appointment['teachers']), set(appointment['subjects']), set(appointment['locations'])))
+    
+    return appointments
 
+def get_schedule_updates():
+    today = datetime.date.today()
+    start_date = today
+    end_date = today + timedelta(days=FETCH_DAYS)
+    timestamp_start = str(int(time.mktime(start_date.timetuple())))
+    timestamp_end = str(int(time.mktime(end_date.timetuple())))
+    
+    print("Fetching appointments from {} to {}..".format(date_to_string(today), date_to_string(end_date)))
+    appointments = []
+
+    for id in group_ids:
+        new_appointments = get_appointments(id, timestamp_start, timestamp_end);
+        if not new_appointments:
+            print("\nSomething went wrong while fetching the appointments!")
+            return;
+        appointments.extend(new_appointments)
+    
     appointments = sorted(appointments)
-    known_dates = []
+    
+    print("Got {} appointments!".format(len(appointments)));
 
     # Compare and detect changes
+    print("Detecting changes..")
+    known_dates = []
     if os.path.exists("data/zermelo_appointments.json"):
         found_changes = False
         os.makedirs("data", exist_ok=True)
@@ -252,14 +273,10 @@ def get_schedule_updates():
         previous_appointments = []
         with open("data/zermelo_appointments.json", "r") as f:
             previous_json = json.loads(f.read())
-
+            
         for appointment in previous_json:
-            if 'startTimeSlot' in appointment:
-                start_time_slot = appointment['startTimeSlot']
-            else:
-                start_time_slot = None
             previous_appointments.append(Appointment(int(appointment["id"]), string_to_datetime(appointment['start']), string_to_datetime(
-            appointment['end']), start_time_slot, set(appointment['teachers']), set(appointment['subjects']), set(appointment['locations'])))
+            appointment['end']), appointment['start_time_slot'], appointment['end_time_slot'], set(appointment['teachers']), set(appointment['subjects']), set(appointment['locations'])))
 
         for new_appt in appointments:
             found_id = False
@@ -290,9 +307,10 @@ def get_schedule_updates():
                 removed_appointment(old_appt)
 
         if not found_changes:
-            print("Updated, found no schedule changes.")
+            print("Updated, no changes found.")
         else:
-            print("Done updating - found changes")
+            print("Updated, changes found.")
+    
     # Save new json
     os.makedirs("data", exist_ok=True)
     appointment_json = json.dumps(
@@ -327,9 +345,9 @@ def update():
  
     # Finally, get the schedule updates
     if access_token is not None:
-        if group_id is None:
-            get_group_id()
-        if group_id is not None:
+        if group_ids is None:
+            get_group_ids()
+        if group_ids is not None:
             get_schedule_updates()
 
 
