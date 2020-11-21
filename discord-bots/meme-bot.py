@@ -151,6 +151,8 @@ async def ping(ctx):
 @bot.event
 async def on_ready():
     print('Logged in as: {0.user}'.format(bot))
+    start_activity = discord.Activity(name='Memes aan het chappen..', type=discord.ActivityType.custom)
+    await bot.change_presence(activity=start_activity)
 
 async def send_meme(message):
     words = re.split(r'[ :?!(),.&;]+', message.content.lower())
@@ -172,7 +174,7 @@ async def on_message(message):
         return
     if message.content.startswith(bot_prefix):
         return
-    
-    await send_meme(message)  
+
+    await send_meme(message)
     
 bot.run(client_secret)
