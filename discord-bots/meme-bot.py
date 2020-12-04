@@ -4,6 +4,8 @@ import re
 import json
 import random
 import datetime
+import asyncio
+import os
 
 # Gobals
 client_secret = None
@@ -11,11 +13,14 @@ onwer_id = None
 bot_prefix = None
 memes = []
 
+ffmpeg_executable = None
+
 with open("config/config.json", "r") as f:
     config_json = json.loads(f.read())
     client_secret = config_json["secret"]
     onwer_id = int(config_json["onwer_id"])
     bot_prefix = config_json["bot_prefix"]
+    ffmpeg_executable = config_json["ffmpeg_executable"]
 
 class Meme:
     def __init__(self, triggers, images):
@@ -51,13 +56,69 @@ def word_in_list(words, word_list):
 def list_to_string(string_list):
     return ', '.join(string_list)
 
-bot = commands.Bot(command_prefix=bot_prefix, help_command=None)
+def load_sounds_folder(folder_name):
+    path = os.path.join(os.getcwd(), "config" + os.path.sep + "sounds" + os.path.sep + folder_name) 
+    paths = []
+    for folder, subs, files in os.walk(path):
+        for filename in files:
+            paths.append(os.path.abspath(os.path.join(folder, filename)))
+    return paths
+
+def get_random_sound(array):
+    return random.choice(array)
+
+start_sounds = load_sounds_folder("start")
+song_start_sounds = load_sounds_folder("song_start")
+song_sounds = load_sounds_folder("songs")
+end_sounds = load_sounds_folder("end")
+
+intents = discord.Intents.all()
+bot = commands.Bot(intents=intents, command_prefix=bot_prefix, help_command=None)
 
 @bot.command()
 async def say(ctx, *, text):
     if ctx.message.author.id == onwer_id:
         await ctx.message.delete()
         await ctx.send(text)
+    else:
+        username = ctx.message.author.mention
+        await ctx.message.delete(delay=5)
+        await ctx.send("Ik luister alleen naar mijn eigenaar, {}!".format(username), delete_after=5)
+
+@bot.command(name="play")
+async def play(ctx, song):
+    try:
+        await ctx.message.delete()
+    except:
+        pass
+    await ctx.send("Ik houd niet van het liedje {}, {}!".format(song, ctx.message.author.mention))
+
+@bot.command(name="join")
+async def join(ctx):
+    if ctx.message.author.id == onwer_id:
+        await ctx.message.delete()
+        await ctx.send("Trying to join the voice channel of {}...".format(ctx.message.author), delete_after=5)
+        user_found = False
+        for guild in bot.guilds:
+            if guild.get_member(ctx.message.author.id) is not None:
+                for voice_channel in guild.voice_channels:
+                    if ctx.message.author in voice_channel.members:
+                        user_found = True
+                        print("[Joining voice channel] Server: {}, Channel: {}, Members: {}".format(guild.name, voice_channel.name, len(voice_channel.members)))
+                        voice_client = await voice_channel.connect()
+
+                        voice_client.play(discord.FFmpegPCMAudio(source=get_random_sound(start_sounds), executable=ffmpeg_executable, before_options="-nostdin"))
+                        await asyncio.sleep(4)
+                        voice_client.play(discord.FFmpegPCMAudio(source=get_random_sound(song_start_sounds), executable=ffmpeg_executable, before_options="-nostdin"))
+                        await asyncio.sleep(6)
+                        voice_client.play(discord.FFmpegPCMAudio(source=get_random_sound(song_sounds), executable=ffmpeg_executable, before_options="-nostdin"))
+                        await asyncio.sleep(10)
+                        voice_client.play(discord.FFmpegPCMAudio(source=get_random_sound(end_sounds), executable=ffmpeg_executable, before_options="-nostdin"))
+                        await asyncio.sleep(5)
+
+                        await voice_client.disconnect()
+        if not user_found:
+            await ctx.send("Couldn't find {} in one of the voice channels of my servers!".format(ctx.message.author), delete_after=5)
     else:
         username = ctx.message.author.mention
         await ctx.message.delete(delay=5)
