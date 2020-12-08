@@ -9,7 +9,7 @@ import os
 
 # Gobals
 client_secret = None
-onwer_id = None
+onwer_ids = None
 bot_prefix = None
 memes = []
 
@@ -18,7 +18,7 @@ ffmpeg_executable = None
 with open("config/config.json", "r") as f:
     config_json = json.loads(f.read())
     client_secret = config_json["secret"]
-    onwer_id = int(config_json["onwer_id"])
+    onwer_ids = [int(id) for id in config_json["onwer_ids"]] 
     bot_prefix = config_json["bot_prefix"]
     ffmpeg_executable = config_json["ffmpeg_executable"]
 
@@ -77,7 +77,7 @@ bot = commands.Bot(intents=intents, command_prefix=bot_prefix, help_command=None
 
 @bot.command()
 async def say(ctx, *, text):
-    if ctx.message.author.id == onwer_id:
+    if ctx.message.author.id in onwer_ids:
         await ctx.message.delete()
         await ctx.send(text)
     else:
@@ -95,7 +95,7 @@ async def play(ctx, song):
 
 @bot.command(name="join")
 async def join(ctx):
-    if ctx.message.author.id == onwer_id:
+    if ctx.message.author.id in onwer_ids:
         await ctx.message.delete()
         await ctx.send("Trying to join the voice channel of {}...".format(ctx.message.author), delete_after=5)
         user_found = False
@@ -126,7 +126,7 @@ async def join(ctx):
 
 @bot.command(name="clear-memes")
 async def clear_memes(ctx, limit):
-    if ctx.message.author.id == onwer_id:
+    if ctx.message.author.id in onwer_ids:
         await ctx.message.delete()
         counter = 0
         async for msg in ctx.message.channel.history():
@@ -141,7 +141,7 @@ async def clear_memes(ctx, limit):
 
 @bot.command(name="add-meme")
 async def add_meme(ctx, trigger, new_meme):
-    if ctx.message.author.id == onwer_id:
+    if ctx.message.author.id in onwer_ids:
         for meme in memes:
             for t in meme.triggers: 
                 if trigger == t.lower():
@@ -158,7 +158,7 @@ async def add_meme(ctx, trigger, new_meme):
 
 @bot.command(name="add-trigger")
 async def add_trigger(ctx, existing_trigger, new_trigger):
-    if ctx.message.author.id == onwer_id:
+    if ctx.message.author.id in onwer_ids:
         for meme in memes:
             for t in meme.triggers: 
                 if existing_trigger == t.lower():
@@ -175,7 +175,7 @@ async def add_trigger(ctx, existing_trigger, new_trigger):
 
 @bot.command(name="add-triggers")
 async def add_triggers(ctx, *args):
-    if ctx.message.author.id == onwer_id:
+    if ctx.message.author.id in onwer_ids:
         new_triggers = [a.lower() for a in args]
         found = False
         for meme in memes:
@@ -195,7 +195,7 @@ async def add_triggers(ctx, *args):
 
 @bot.command(name="help")
 async def help(ctx):
-    if ctx.message.author.id == onwer_id:
+    if ctx.message.author.id in onwer_ids:
         await ctx.send("Waar kan ik u mee van dienst zijn?\n*(Ik luister btw alleen naar mijn eigenaren)*\n\n**Commando's:**\nGebruik de prefix: '`{}`'\n`add-meme [trigger] [new-meme]` voeg een nieuw plaatje toe aan een bestaande meme\n`add-trigger [existing-trigger] [new-trigger]` voeg een nieuwe trigger toe aan een bestaande meme\n`add-triggers [trigger] ..` voeg een nieuwe en lege meme toe met triggers".format(bot_prefix))
     else:
         await ctx.message.delete(delay=5)
@@ -203,7 +203,7 @@ async def help(ctx):
 
 @bot.command()
 async def ping(ctx):
-    if ctx.message.author.id == onwer_id:
+    if ctx.message.author.id in onwer_ids:
         await ctx.send('Pong! {0}ms'.format(round(bot.latency * 1000)))
     else:
         await ctx.message.delete(delay=5)
