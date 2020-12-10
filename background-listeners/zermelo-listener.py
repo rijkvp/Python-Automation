@@ -26,6 +26,11 @@ with open('config/settings.json') as settings_file:
     settings_json = json.load(settings_file)
     sync_delay = int(settings_json["sync_delay"])
 
+with open('config/subjects.json') as file:
+    subject_list = json.loads(file.read())
+with open('config/teachers.json') as file:
+    teacher_list = json.loads(file.read())
+
 organization = None
 auth_code = None
 endpoint = None
@@ -46,12 +51,7 @@ def load_credentials():
         auth_code = config_json["auth_code"].replace(" ", "") # Remove the spaces from code (useful for copying)
     endpoint = "https://{}.zportal.nl/api/v3/".format(organization)
 
-def apppointment_message(appointment, info):
-    with open('config/subjects.json') as file:
-        subject_list = json.loads(file.read())
-    with open('config/teachers.json') as file:
-        teacher_list = json.loads(file.read())
-    
+def appointment_to_fields(appointment):
     subject_short = ', '.join(appointment.subjects)
     if subject_short in subject_list:
         subject_name = subject_list[subject_short]
@@ -65,7 +65,7 @@ def apppointment_message(appointment, info):
         teacher_name = teacher_short.upper()
     location = ', '.join(appointment.locations)
     weekday = WEEKDAY_ABBREVIATIONS[appointment.start.weekday()]
-    fields = {
+    return {
         "Vak": subject_name,
         "Docent": teacher_name,
         "Lokaal": location,
@@ -73,19 +73,32 @@ def apppointment_message(appointment, info):
         "Datum": weekday + " " + appointment.start.strftime("%d-%m"),
         "Tijd": appointment.start.strftime("%H:%M") + " - " + appointment.end.strftime("%H:%M")
     }
-    notifier.notify(("__{}__ " + info).format(subject_name), fields, "Zermelo")
+    
+def apppointment_message(appointment, info):
+    fields = appointment_to_fields(appointment)
+    notifier.notify(("__{}__ " + info).format(fields["Vak"]), appointment_to_fields(appointment), "Zermelo")
 
 def new_appointment(appointment):
-    apppointment_message(appointment, "is toegevoegd/verplaatst")
+    apppointment_message(appointment, "is toegevoegd")
 
 def removed_appointment(appointment):
     apppointment_message(appointment, "valt uit!")
-    
+
+def combine_field_changes(before, after):
+    combined = {}
+    for key, value in after.items():
+        original = before[key]
+        if str(value) != str(original):
+            combined[key] = "{} 🡆 {}".format(original, value);
+        else:
+            combined[key] = value;
+    return combined;
+
 def changed_appointment(old, new):
-    pass
-    # TODO Detect change
-    # TODO Send nice message about change
-    # notifier.notify("__{}__ is aangepast", "desc", "" "zermelo")
+    old_fields = appointment_to_fields(old)
+    new_fields = appointment_to_fields(new)
+    fields = combine_field_changes(old_fields, new_fields)
+    notifier.notify(("__{}__ is aangepast").format(fields["Vak"]), fields, "Zermelo")
 
 def authenticate():
     global access_token
@@ -105,7 +118,7 @@ def authenticate():
             print("Skipped checking token expiration!")
             return
 
-    data = {"grant_type": "authorization_code", "code": auth_code}
+    data = {"grant_type": "aucthorization_code", "code": auth_code}
     header = {"Accept": "application/json"}
     token_response = requests.post(
         endpoint + "oauth/token", data=data, headers=header)
@@ -188,33 +201,36 @@ def get_group_ids():
         notifier.notify_error("Couldn't find the group IS(s)!", "Groups names: {}".format(group_names))
 
 class Appointment:
-        def __init__(self, id, start: datetime.datetime, end: datetime.datetime, start_time_slot, end_time_slot, teachers, subjects, locations):
-            self.id = id
-            self.start = start
-            self.end = end
-            self.start_time_slot = start_time_slot # Int or None
-            self.end_time_slot = end_time_slot # Int or None
-            self.teachers = teachers
-            self.subjects = subjects
-            self.locations = locations
+    def __init__(self, id, start: datetime.datetime, end: datetime.datetime, start_time_slot, end_time_slot, teachers, subjects, locations):
+        self.id = id
+        self.start = start
+        self.end = end
+        self.start_time_slot = start_time_slot # Int or None
+        self.end_time_slot = end_time_slot # Int or None
+        self.teachers = teachers
+        self.subjects = subjects
+        self.locations = locations
 
-        def __eq__(self, obj):
-            return self.start == obj.start and self.end == obj.end and self.teachers == obj.teachers and self.subjects == obj.subjects and self.locations == obj.locations
-        
-        def __lt__(self, other):
-            return self.start < other.start
+    def __eq__(self, obj):
+        return self.id == obj.id
+    
+    def has_changed(self, obj):
+        return not (self.start == obj.start and self.end == obj.end and self.teachers == obj.teachers and self.subjects == obj.subjects and self.locations == obj.locations)
 
-        def as_dict(self):
-            return {
-                "id": str(self.id),
-                "start": datetime_to_string(self.start),
-                "end": datetime_to_string(self.end),
-                "start_time_slot": str(self.start_time_slot),
-                "end_time_slot": str(self.end_time_slot),
-                "teachers": list(self.teachers),
-                "subjects": list(self.subjects),
-                "locations": list(self.locations),
-            }
+    def __lt__(self, other):
+        return self.start < other.start
+
+    def as_dict(self):
+        return {
+            "id": str(self.id),
+            "start": datetime_to_string(self.start),
+            "end": datetime_to_string(self.end),
+            "start_time_slot": str(self.start_time_slot),
+            "end_time_slot": str(self.end_time_slot),
+            "teachers": list(self.teachers),
+            "subjects": list(self.subjects),
+            "locations": list(self.locations),
+        }
 
 def get_appointments(group_id, timestamp_start, timestamp_end):
     appointments = []
@@ -233,6 +249,39 @@ def get_appointments(group_id, timestamp_start, timestamp_end):
         appointment['end']), appointment['startTimeSlot'], appointment['endTimeSlot'], set(appointment['teachers']), set(appointment['subjects']), set(appointment['locations'])))
     
     return appointments
+
+def detect_appointment_updates(old_appts, new_appts, known_dates):
+    found_updates = False
+    update_count = 0
+    for new_appt in new_appts:
+        found_appt = False
+        old_appt = None
+        for appt in old_appts:
+            if appt == new_appt:
+                found_appt = True
+                old_appt = appt
+                break
+
+        if found_appt:
+            if new_appt.has_changed(old_appt):
+                found_updates = True
+                update_count += 1
+                changed_appointment(old_appt, new_appt)
+        else:
+            if new_appt.start.date() in known_dates: # Only notify if this was on a known date
+                found_updates = True
+                update_count += 1
+                new_appointment(new_appt)
+    
+    # Check if the appointment still exists or if it got removed
+    for old_appt in old_appts:
+        found_appt = False
+        if not old_appt in new_appts:
+            if old_appt.start.date() in known_dates:  # Only notify if this was on a known date
+                found_updates = True
+                update_count += 1
+                removed_appointment(old_appt)
+    return found_updates, update_count
 
 def get_schedule_updates():
     today = datetime.date.today()
@@ -278,38 +327,12 @@ def get_schedule_updates():
             previous_appointments.append(Appointment(int(appointment["id"]), string_to_datetime(appointment['start']), string_to_datetime(
             appointment['end']), appointment['start_time_slot'], appointment['end_time_slot'], set(appointment['teachers']), set(appointment['subjects']), set(appointment['locations'])))
 
-        for new_appt in appointments:
-            found_id = False
-            old_appt = None
-            for appt in previous_appointments:
-                if appt.id == new_appt.id:
-                    found_id = True
-                    old_appt = appt
-                    break
-            
-            if not found_id and new_appt.start.date() in known_dates:
-                found_changes = True
-                new_appointment(new_appt)
-
-            if found_id and new_appt not in previous_appointments:
-                found_changes = True
-                changed_appointment(new_appt, old_appt)
+        found_changes, update_count = detect_appointment_updates(previous_appointments, appointments, known_dates)
         
-        for old_appt in previous_appointments:
-            # Check if the appointment still exists if not then it got removed
-            found_id = False
-            for new_appt in appointments:
-                if old_appt.id == new_appt.id:
-                    found_id = True
-                    break
-            if not found_id and old_appt.start.date() in known_dates:
-                found_changes = True
-                removed_appointment(old_appt)
-
         if not found_changes:
             print("Updated, no changes found.")
         else:
-            print("Updated, changes found.")
+            print("Updated, found {} schedule changes.".format(update_count))
     
     # Save new json
     os.makedirs("data", exist_ok=True)
