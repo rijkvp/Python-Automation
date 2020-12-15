@@ -10,12 +10,23 @@ discord_tts = False
 discord_webhooks = []
 
 class DiscordWebhook:
-    def __init__ (self, name, username, message, avatar_url, webhook_urls):
+    def __init__ (self, name, username, avatar_url, mention_prefix, webhook_urls):
         self.name = name
         self.username = username
-        self.message = message
         self.avatar_url = avatar_url
+        self.mention_prefix = mention_prefix
         self.webhook_urls = webhook_urls
+
+class NotificationCard:
+    def __init__(self, title, description, fields):
+        self.title = title
+        self.description = description
+        self.fields = fields
+
+class Notification:
+    def __init__ (self, message, cards):
+        self.title = message
+        self.cards = cards
 
 with open("config/notification_settings.json") as config_file:
     config_json = json.load(config_file)
@@ -24,20 +35,20 @@ with open("config/notification_settings.json") as config_file:
     discord_tts = config_json["discord_tts"]
     discord_webhooks_json = config_json["discord_webhooks"]
     for disc_wh in discord_webhooks_json:
-        discord_webhooks.append(DiscordWebhook(disc_wh["name"], disc_wh["username"], disc_wh["message"], disc_wh["avatar_url"], disc_wh["webhook_urls"]))
+        discord_webhooks.append(DiscordWebhook(disc_wh["name"], disc_wh["username"], disc_wh["avatar_url"], disc_wh["mention_prefix"], disc_wh["webhook_urls"]))
 
 def validate_text(string, max_length):
     return textwrap.shorten(string, width=max_length, placeholder="...")
 
 # Send an OS notification using plyer package
-def send_os_notification(title, message, context_name):
+def send_os_notification(notification, context_name):
     if not send_os_notifications:
         return
-    title_short = validate_text(title, 64)
-    message_short = validate_text(message, 64)
+    title_short = validate_text(notification.title, 64)
+    message_short = validate_text(cards_to_string(notification.cards), 64)
     plyer.notification.notify(title=title_short, message=message_short, app_name=context_name, app_icon="config/notification_icon.ico")
 
-def send_discord_message(title, fields, webhook_name):
+def send_discord_notification(notification, webhook_name):
     if not send_discord_messages:
         return
     for disc_wh in discord_webhooks:
@@ -45,29 +56,34 @@ def send_discord_message(title, fields, webhook_name):
             for webhook_url in disc_wh.webhook_urls:
                 username = disc_wh.username
                 avatar = disc_wh.avatar_url
-                timestamp = datetime.datetime.now().isoformat()
                 
-                embed_fields = []
-                for name, value in fields.items():
-                    embed_fields.append({
-                        "name": name,
-                        "value": value,
-                        "inline": True,
-                    })
+                embeds = []
+                for card in notification.cards:
+                    embed = {}
+                    embed["color"] = 15158332
+                    if card.title is not None:
+                        embed["title"] = card.title
+                    if card.description is not None:
+                        embed["description"] = card.description
+                    if card.fields is not None:
+                        embed_fields = []
+                        for name, value in card.fields.items():
+                            embed_fields.append({
+                                "name": name,
+                                "value": value,
+                                "inline": True,
+                            })
+                        embed["fields"] = embed_fields
+
+                    embeds.append(embed)
+
 
                 data = json.dumps({
                     "username": username,
                     "avatar_url": avatar,
                     "tts": discord_tts,
-                    "content": disc_wh.message,
-                    "embeds": [
-                        {
-                            "title": title,
-                            "fields": embed_fields,
-                            "color": 15158332,
-                            "timestamp": timestamp
-                        }
-                    ]
+                    "content": disc_wh.mention_prefix + " " + notification.title,
+                    "embeds": embeds
                 })
 
                 json_header = {
@@ -77,25 +93,33 @@ def send_discord_message(title, fields, webhook_name):
                 response = requests.post(webhook_url, data, headers=json_header)
 
                 if not response.ok:
-                        print("Failed to execute discord wehook!")
-                        print(response.status_code)
-                        print(response.reason)
-                        print(response.text)
+                    print("Failed to execute discord wehook!")
+                    print(response.status_code)
+                    print(response.reason)
+                    print(response.text)
 
-def fields_to_sring(fields):
+def cards_to_string(cards):
     string = ""
-    for name, value in fields.items():
-        string += str(name) + ": " + str(value)
+    for card in cards:
+        if card.title is not None:
+            string += card.title + " "
+        if card.description is not None:
+            string += card.description + " "
+        if card.fields is not None:
+            for name, value in card.fields.items():
+                string += str(name) + ": " + str(value) + " "
+
     return string
 
-def notify(title, fields, context_name):
-    print("\n[CONSOLE MESSAGE]")
-    print(title)
-    message = fields_to_sring(fields)
+def send_console_notification(notification, context_name):
+    print("\n[" + notification.title + "] (" + context_name + ")")
+    message = cards_to_string(notification.cards)
     print(message)
 
-    send_discord_message(title, fields, context_name)
-    send_os_notification(title, message, context_name)
+def notify(notification, context):
+    send_console_notification(notification, context)
+    send_discord_notification(notification, context)
+    send_os_notification(notification, context)
 
 def notify_error(title, message):
     print("\n[CONSOLE ERROR MESSAGE]")

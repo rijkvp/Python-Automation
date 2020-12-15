@@ -3,6 +3,7 @@ import time
 import requests
 import json
 import os
+from enum import Enum
 from apscheduler.schedulers.blocking import BlockingScheduler
 from datetime import timedelta
 import operator
@@ -19,7 +20,7 @@ WEEKDAY_ABBREVIATIONS = {
     6: "Zo"
 }
 
-FETCH_DAYS = 10 # Delete known days when decreasing the ammount
+FETCH_DAYS = 10  # Delete known days when decreasing the ammount
 sync_delay = 30
 
 with open('config/settings.json') as settings_file:
@@ -39,6 +40,7 @@ group_names = None
 group_ids = None
 expiration_time = None
 
+
 def load_credentials():
     global organization
     global auth_code
@@ -48,8 +50,10 @@ def load_credentials():
         config_json = json.load(config_file)
         group_names = config_json["group_names"]
         organization = config_json["organization"]
-        auth_code = config_json["auth_code"].replace(" ", "") # Remove the spaces from code (useful for copying)
+        # Remove the spaces from code (useful for copying)
+        auth_code = config_json["auth_code"].replace(" ", "")
     endpoint = "https://{}.zportal.nl/api/v3/".format(organization)
+
 
 def appointment_to_fields(appointment):
     subject_short = ', '.join(appointment.subjects)
@@ -73,32 +77,41 @@ def appointment_to_fields(appointment):
         "Datum": weekday + " " + appointment.start.strftime("%d-%m"),
         "Tijd": appointment.start.strftime("%H:%M") + " - " + appointment.end.strftime("%H:%M")
     }
-    
-def apppointment_message(appointment, info):
+
+
+def new_appointment_card(appointment):
     fields = appointment_to_fields(appointment)
-    notifier.notify(("__{}__ " + info).format(fields["Vak"]), appointment_to_fields(appointment), "Zermelo")
+    return notifier.NotificationCard(("__{}__ is toegevoegd").format(fields["Vak"]), None, fields)
 
-def new_appointment(appointment):
-    apppointment_message(appointment, "is toegevoegd")
 
-def removed_appointment(appointment):
-    apppointment_message(appointment, "valt uit!")
+def cancelled_appointment_card(appointment):
+    fields = appointment_to_fields(appointment)
+    return notifier.NotificationCard(("__{}__ valt uit!").format(fields["Vak"]), None, fields)
+
 
 def combine_field_changes(before, after):
     combined = {}
     for key, value in after.items():
         original = before[key]
         if str(value) != str(original):
-            combined[key] = "{} 🡆 {}".format(original, value);
+            combined[key] = "{} 🡆 {}".format(original, value)
         else:
-            combined[key] = value;
-    return combined;
+            combined[key] = value
+    return combined
 
-def changed_appointment(old, new):
+
+def changed_appointment_card(old, new):
     old_fields = appointment_to_fields(old)
     new_fields = appointment_to_fields(new)
     fields = combine_field_changes(old_fields, new_fields)
-    notifier.notify(("__{}__ is aangepast").format(fields["Vak"]), fields, "Zermelo")
+    return notifier.NotificationCard(("__{}__ is aangepast").format(fields["Vak"]), None, fields)
+
+def format_subject_list(subject_list):
+    names = []
+    for subjects in subject_list:
+        for subject in subjects:
+            names.append(subject.upper())
+    return ', '.join(names)
 
 def authenticate():
     global access_token
@@ -106,7 +119,7 @@ def authenticate():
 
     if os.path.isfile('data/zermelo_access_token.json'):
         with open("data/zermelo_access_token.json") as file:
-            json_data = json.loads(file.read()) 
+            json_data = json.loads(file.read())
             access_token = json_data["access_token"]
             expiration_time = string_to_datetime(json_data["expiration_time"])
             # Testing: Don't check
@@ -130,7 +143,7 @@ def authenticate():
         expiration_delay = token_json["expires_in"]
         expiration_time = datetime.datetime.now() + timedelta(seconds=expiration_delay)
         print("Expires on: " + datetime_to_string(expiration_time))
-        
+
         os.makedirs("data", exist_ok=True)
         with open("data/zermelo_access_token.json", "w") as file:
             access_token_json = {
@@ -147,7 +160,8 @@ def authenticate():
     else:
         access_token = None
         expiration_time = None
-        error_title = str(token_response.status_code) + " " + token_response.reason + " - authentication failed"
+        error_title = str(token_response.status_code) + " " + \
+            token_response.reason + " - authentication failed"
         error_msg = "Response: '" + token_response.text + "'\nMake sure the credentials are valid in zermelo_credentials.json:\nSchool code: {0}, Auth code: {1}".format(
             organization, auth_code)
 
@@ -157,26 +171,32 @@ def authenticate():
 def convert_timestamp(timestamp):
     return datetime.datetime.fromtimestamp(timestamp)
 
+
 def datetime_to_string(date_time):
     return date_time.strftime("%Y-%m-%dT%H:%M")
+
 
 def date_to_string(date):
     return date.strftime("%Y-%m-%d")
 
+
 def string_to_datetime(string):
     return datetime.datetime.strptime(string, "%Y-%m-%dT%H:%M")
+
 
 def string_to_date(string):
     return datetime.datetime.strptime(string, "%Y-%m-%d").date()
 
+
 def get_group_ids():
     global group_ids
 
-    groups_response = requests.get(endpoint + "groupindepartments?access_token=" + access_token)
+    groups_response = requests.get(
+        endpoint + "groupindepartments?access_token=" + access_token)
 
     if not groups_response.ok:
-        notifier.notify_error("{} {} - failed to get groups".format(groups_response.status_code, groups_response.reason), 
-        "Response: '{}'".format(groups_response.text))
+        notifier.notify_error("{} {} - failed to get groups".format(groups_response.status_code, groups_response.reason),
+                              "Response: '{}'".format(groups_response.text))
         return
 
     groups_json = groups_response.json()['response']['data']
@@ -189,7 +209,7 @@ def get_group_ids():
     found_group_names = []
     for item in groups_json:
         for group_name in group_names:
-            if group_name in found_group_names: # Only use the first group id found
+            if group_name in found_group_names:  # Only use the first group id found
                 continue
             if item["name"] == group_name and item["isMentorGroup"] and item["isMainGroup"]:
                 group_ids.append(item["id"])
@@ -198,22 +218,24 @@ def get_group_ids():
     if len(group_ids) > 0:
         print("Group IDs: {}".format(group_ids))
     else:
-        notifier.notify_error("Couldn't find the group IS(s)!", "Groups names: {}".format(group_names))
+        notifier.notify_error("Couldn't find the group IS(s)!",
+                              "Groups names: {}".format(group_names))
+
 
 class Appointment:
     def __init__(self, id, start: datetime.datetime, end: datetime.datetime, start_time_slot, end_time_slot, teachers, subjects, locations):
         self.id = id
         self.start = start
         self.end = end
-        self.start_time_slot = start_time_slot # Int or None
-        self.end_time_slot = end_time_slot # Int or None
+        self.start_time_slot = start_time_slot  # Int or None
+        self.end_time_slot = end_time_slot  # Int or None
         self.teachers = teachers
         self.subjects = subjects
         self.locations = locations
 
     def __eq__(self, obj):
         return self.id == obj.id
-    
+
     def has_changed(self, obj):
         return not (self.start == obj.start and self.end == obj.end and self.teachers == obj.teachers and self.subjects == obj.subjects and self.locations == obj.locations)
 
@@ -232,14 +254,28 @@ class Appointment:
             "locations": list(self.locations),
         }
 
+
+class ChangeType(Enum):
+    NEW = 1
+    CANCELLED = 2
+    CHANGED = 3
+
+
+class AppointmentUpdate:
+    def __init__(self, old_appointment, new_appointment, type):
+        self.old_appointment = old_appointment
+        self.new_appointment = new_appointment
+        self.type = type
+
+
 def get_appointments(group_id, timestamp_start, timestamp_end):
     appointments = []
     appointment_response = requests.get(endpoint + "appointments?access_token=" + access_token +
-                                "&start=" + timestamp_start + "&end="+timestamp_end+"&valid=true" + "&containsStudentsFromGroupInDepartment=" + str(group_id))
+                                        "&start=" + timestamp_start + "&end="+timestamp_end+"&valid=true" + "&containsStudentsFromGroupInDepartment=" + str(group_id))
 
     if not appointment_response.ok:
-        notifier.notify_error("{} {} - failed to get appointments!".format(appointment_response.status_code, appointment_response.reason), 
-        "Group ID: {}, Response: '{}'".format(group_id, appointment_response.text))
+        notifier.notify_error("{} {} - failed to get appointments!".format(appointment_response.status_code, appointment_response.reason),
+                              "Group ID: {}, Response: '{}'".format(group_id, appointment_response.text))
         return
 
     appointment_data = appointment_response.json()['response']['data']
@@ -247,13 +283,14 @@ def get_appointments(group_id, timestamp_start, timestamp_end):
     for appointment in appointment_data:
         if appointment["cancelled"] == False:
             appointments.append(Appointment(appointment["appointmentInstance"], convert_timestamp(appointment['start']), convert_timestamp(
-            appointment['end']), appointment['startTimeSlot'], appointment['endTimeSlot'], set(appointment['teachers']), set(appointment['subjects']), set(appointment['locations'])))
-    
+                appointment['end']), appointment['startTimeSlot'], appointment['endTimeSlot'], set(appointment['teachers']), set(appointment['subjects']), set(appointment['locations'])))
+
     return appointments
+
 
 def detect_appointment_updates(old_appts, new_appts, known_dates):
     found_updates = False
-    update_count = 0
+    updates = []
     for new_appt in new_appts:
         found_appt = False
         old_appt = None
@@ -266,44 +303,88 @@ def detect_appointment_updates(old_appts, new_appts, known_dates):
         if found_appt:
             if new_appt.has_changed(old_appt):
                 found_updates = True
-                update_count += 1
-                changed_appointment(old_appt, new_appt)
+                updates.append(AppointmentUpdate(
+                    old_appt, new_appt, ChangeType.CHANGED))
         else:
-            if new_appt.start.date() in known_dates: # Only notify if this was on a known date
+            if new_appt.start.date() in known_dates:  # Only notify if this was on a known date
                 found_updates = True
-                update_count += 1
-                new_appointment(new_appt)
-    
+                updates.append(AppointmentUpdate(
+                    None, new_appt, ChangeType.NEW))
+
     # Check if the appointment still exists or if it got removed
     for old_appt in old_appts:
         found_appt = False
         if not old_appt in new_appts:
             if old_appt.start.date() in known_dates:  # Only notify if this was on a known date
                 found_updates = True
-                update_count += 1
-                removed_appointment(old_appt)
-    return found_updates, update_count
+                updates.append(AppointmentUpdate(
+                    old_appt, None, ChangeType.CANCELLED))
+
+    return found_updates, updates
+
+
+def notify_updates(updates):
+    new_updates = []
+    cancelled_updates = []
+    changed_updates = []
+    for update in updates:
+        if update.type == ChangeType.NEW:
+            new_updates.append(update)
+        elif update.type == ChangeType.CANCELLED:
+            cancelled_updates.append(update)
+        elif update.type == ChangeType.CHANGED:
+            changed_updates.append(update)
+
+    cards = []
+
+    if len(new_updates) <= 3:
+        for update in new_updates:
+            cards.append(new_appointment_card(update.new_appointment))
+    else:
+        cards.append(notifier.NotificationCard("{} toegevoegde lessen: ".format(len(
+            new_updates)), format_subject_list([u.new_appointment.subjects for u in new_updates]), None))
+
+    if len(cancelled_updates) <= 3:
+        for update in cancelled_updates:
+            cards.append(cancelled_appointment_card(update.old_appointment))
+    else:
+        cards.append(notifier.NotificationCard("{} lessen vallen uit".format(len(cancelled_updates)), ', '.join(
+            [str(u.old_appointment.subjects) for u in cancelled_updates]), None))
+
+    if len(changed_updates) <= 3:
+        for update in changed_updates:
+            cards.append(changed_appointment_card(
+                update.old_appointment, update.new_appointment))
+    else:
+        cards.append(notifier.NotificationCard("{} lessen zijn aangepast".format(len(
+            changed_updates)), ', '.join([str(u.new_appointment.subjects) for u in changed_updates]), None))
+
+    update_notification = notifier.Notification(
+        "Het zermelo rooster is gewijzigd:", cards)
+    notifier.notify(update_notification, "Testing")
+
 
 def get_schedule_updates():
-    today = datetime.date.today()
+    today = datetime.date.today() - timedelta(days=4)
     start_date = today
     end_date = today + timedelta(days=FETCH_DAYS)
     timestamp_start = str(int(time.mktime(start_date.timetuple())))
     timestamp_end = str(int(time.mktime(end_date.timetuple())))
-    
-    print("Fetching appointments from {} to {}..".format(date_to_string(today), date_to_string(end_date)))
+
+    print("Fetching appointments from {} to {}..".format(
+        date_to_string(today), date_to_string(end_date)))
     appointments = []
 
     for id in group_ids:
-        new_appointments = get_appointments(id, timestamp_start, timestamp_end);
+        new_appointments = get_appointments(id, timestamp_start, timestamp_end)
         if not new_appointments:
             print("\nSomething went wrong while fetching the appointments!")
-            return;
+            return
         appointments.extend(new_appointments)
-    
+
     appointments = sorted(appointments)
-    
-    print("Got {} appointments!".format(len(appointments)));
+
+    print("Got {} appointments!".format(len(appointments)))
 
     # Compare and detect changes
     print("Detecting changes..")
@@ -311,7 +392,7 @@ def get_schedule_updates():
     if os.path.exists("data/zermelo_appointments.json"):
         found_changes = False
         os.makedirs("data", exist_ok=True)
-        
+
         if os.path.exists("data/zermelo_known_dates.json"):
             with open("data/zermelo_known_dates.json", "r") as f:
                 known_dates_json = json.loads(f.read())
@@ -323,25 +404,29 @@ def get_schedule_updates():
         previous_appointments = []
         with open("data/zermelo_appointments.json", "r") as f:
             previous_json = json.loads(f.read())
-            
+
         for appointment in previous_json:
             previous_appointments.append(Appointment(int(appointment["id"]), string_to_datetime(appointment['start']), string_to_datetime(
-            appointment['end']), appointment['start_time_slot'], appointment['end_time_slot'], set(appointment['teachers']), set(appointment['subjects']), set(appointment['locations'])))
+                appointment['end']), appointment['start_time_slot'], appointment['end_time_slot'], set(appointment['teachers']), set(appointment['subjects']), set(appointment['locations'])))
 
-        found_changes, update_count = detect_appointment_updates(previous_appointments, appointments, known_dates)
-        
-        if not found_changes:
-            print("Updated, no changes found.")
+        found_changes, updates = detect_appointment_updates(
+            previous_appointments, appointments, known_dates)
+
+        if found_changes:
+            print(type(updates))
+            print("Updated, found {} schedule changes! Sending notifications..".format(
+                len(updates)))
+            notify_updates(updates)
         else:
-            print("Updated, found {} schedule changes.".format(update_count))
-    
+            print("Updated, no changes found.")
+
     # Save new json
     os.makedirs("data", exist_ok=True)
     appointment_json = json.dumps(
         [a.as_dict() for a in appointments])
     with open("data/zermelo_appointments.json", "w+") as f:
         f.write(appointment_json)
-    
+
     for appt in appointments:
         appt_date = appt.start.date()
         if appt_date not in known_dates:
@@ -352,6 +437,7 @@ def get_schedule_updates():
     with open("data/zermelo_known_dates.json", "w+") as f:
         f.write(dates_json)
 
+
 def update():
     # Load user config - credentials
     load_credentials()
@@ -359,14 +445,14 @@ def update():
     # First, make sure the portal is online
     portal_status = requests.get(endpoint + "status/status_message")
     if not portal_status.ok:
-        notifier.notify_error("Portal is offline", 
-        "{} - {}\n{}\nEndpoint: {}".format(portal_status.status_code, portal_status.reason, portal_status.text, endpoint))
+        notifier.notify_error("Portal is offline",
+                              "{} - {}\n{}\nEndpoint: {}".format(portal_status.status_code, portal_status.reason, portal_status.text, endpoint))
         return
 
     # Then, receive the acces token if not already done
     if access_token is None:
         authenticate()
- 
+
     # Finally, get the schedule updates
     if access_token is not None:
         if group_ids is None:
