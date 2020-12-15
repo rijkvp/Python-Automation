@@ -245,8 +245,9 @@ def get_appointments(group_id, timestamp_start, timestamp_end):
     appointment_data = appointment_response.json()['response']['data']
 
     for appointment in appointment_data:
-        appointments.append(Appointment(appointment["id"], convert_timestamp(appointment['start']), convert_timestamp(
-        appointment['end']), appointment['startTimeSlot'], appointment['endTimeSlot'], set(appointment['teachers']), set(appointment['subjects']), set(appointment['locations'])))
+        if appointment["cancelled"] == False:
+            appointments.append(Appointment(appointment["appointmentInstance"], convert_timestamp(appointment['start']), convert_timestamp(
+            appointment['end']), appointment['startTimeSlot'], appointment['endTimeSlot'], set(appointment['teachers']), set(appointment['subjects']), set(appointment['locations'])))
     
     return appointments
 
