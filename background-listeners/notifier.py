@@ -40,7 +40,7 @@ with open("config/notification_settings.json") as config_file:
 def validate_text(string, max_length):
     return textwrap.shorten(string, width=max_length, placeholder="...")
 
-# Send an OS notification using plyer package
+# Send an OS notification using the plyer package
 def send_os_notification(notification, context_name):
     if not send_os_notifications:
         return

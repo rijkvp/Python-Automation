@@ -28,9 +28,9 @@ with open('config/settings.json') as settings_file:
     sync_delay = int(settings_json["sync_delay"])
 
 with open('config/subjects.json') as file:
-    subject_list = json.loads(file.read())
+    subject_dict = json.loads(file.read())
 with open('config/teachers.json') as file:
-    teacher_list = json.loads(file.read())
+    teacher_dict = json.loads(file.read())
 
 organization = None
 auth_code = None
@@ -39,13 +39,14 @@ access_token = None
 group_names = None
 group_ids = None
 expiration_time = None
-
+website = None
 
 def load_credentials():
     global organization
     global auth_code
     global endpoint
     global group_names
+    global website
     with open('config/zermelo_credentials.json') as config_file:
         config_json = json.load(config_file)
         group_names = config_json["group_names"]
@@ -53,18 +54,19 @@ def load_credentials():
         # Remove the spaces from code (useful for copying)
         auth_code = config_json["auth_code"].replace(" ", "")
     endpoint = "https://{}.zportal.nl/api/v3/".format(organization)
+    website = "https://{}.zportal.nl".format(organization)
 
 
 def appointment_to_fields(appointment):
     subject_short = ', '.join(appointment.subjects)
-    if subject_short in subject_list:
-        subject_name = subject_list[subject_short]
+    if subject_short in subject_dict:
+        subject_name = subject_dict[subject_short]
     else:
         subject_name = subject_short.upper()
 
     teacher_short = ', '.join(appointment.teachers)
-    if teacher_short in teacher_list:
-        teacher_name = teacher_list[teacher_short]
+    if teacher_short in teacher_dict:
+        teacher_name = teacher_dict[teacher_short]
     else:
         teacher_name = teacher_short.upper()
     location = ', '.join(appointment.locations)
@@ -106,12 +108,22 @@ def changed_appointment_card(old, new):
     fields = combine_field_changes(old_fields, new_fields)
     return notifier.NotificationCard(("__{}__ is aangepast").format(fields["Vak"]), None, fields)
 
+
 def format_subject_list(subject_list):
-    names = []
+    all_subjects = []
     for subjects in subject_list:
         for subject in subjects:
-            names.append(subject.upper())
-    return ', '.join(names)
+            all_subjects.append(subject.lower())
+    short_subjects = list(dict.fromkeys(all_subjects))
+    subject_names = []
+    for short_subject in short_subjects:
+        if short_subject in subject_dict:
+            subject_names.append(subject_dict[short_subject])
+        else:
+            subject_names.append(short_subject.upper())
+    subject_names = sorted(subject_names)
+    return ', '.join(subject_names)
+
 
 def authenticate():
     global access_token
@@ -336,32 +348,31 @@ def notify_updates(updates):
             changed_updates.append(update)
 
     cards = []
+    if len(cancelled_updates) <= 3:
+        for update in cancelled_updates:
+            cards.append(cancelled_appointment_card(update.old_appointment))
+    else:
+        cards.append(notifier.NotificationCard("Er zijn {} vervallen lessen:".format(len(cancelled_updates)),
+                                               "**Van de vakken:** " + format_subject_list([u.old_appointment.subjects for u in cancelled_updates]) + "\n\n_Zie " + website + " voor meer info_", None))
 
     if len(new_updates) <= 3:
         for update in new_updates:
             cards.append(new_appointment_card(update.new_appointment))
     else:
-        cards.append(notifier.NotificationCard("{} toegevoegde lessen: ".format(len(
-            new_updates)), format_subject_list([u.new_appointment.subjects for u in new_updates]), None))
-
-    if len(cancelled_updates) <= 3:
-        for update in cancelled_updates:
-            cards.append(cancelled_appointment_card(update.old_appointment))
-    else:
-        cards.append(notifier.NotificationCard("{} lessen vallen uit".format(len(cancelled_updates)), ', '.join(
-            [str(u.old_appointment.subjects) for u in cancelled_updates]), None))
+        cards.append(notifier.NotificationCard("Er zijn {} toegevoegde lessen:".format(len(
+            new_updates)), "**Van de vakken:** " + format_subject_list([u.new_appointment.subjects for u in new_updates]) + "\n\n_Zie " + website + " voor meer info_", None))
 
     if len(changed_updates) <= 3:
         for update in changed_updates:
             cards.append(changed_appointment_card(
                 update.old_appointment, update.new_appointment))
     else:
-        cards.append(notifier.NotificationCard("{} lessen zijn aangepast".format(len(
-            changed_updates)), ', '.join([str(u.new_appointment.subjects) for u in changed_updates]), None))
+        cards.append(notifier.NotificationCard("Er zijn {} lessen zijn aangepast:".format(len(
+            changed_updates)), "**Van de vakken:** " + format_subject_list([u.new_appointment.subjects for u in changed_updates]) + "\n\n_Zie " + website + " voor meer info_", None))
 
     update_notification = notifier.Notification(
         "Het zermelo rooster is gewijzigd:", cards)
-    notifier.notify(update_notification, "Testing")
+    notifier.notify(update_notification, "Zermelo")
 
 
 def get_schedule_updates():
@@ -413,7 +424,6 @@ def get_schedule_updates():
             previous_appointments, appointments, known_dates)
 
         if found_changes:
-            print(type(updates))
             print("Updated, found {} schedule changes! Sending notifications..".format(
                 len(updates)))
             notify_updates(updates)
