@@ -6,6 +6,7 @@ import os
 import re
 from enum import Enum
 import notifier
+import html2text
 
 BASE_URL = "https://production.somtoday.nl"
 
@@ -13,6 +14,10 @@ sync_interval = 30
 with open('config/settings.json') as settings_file:
     settings_json = json.load(settings_file)
     sync_interval = int(settings_json["sync_interval"])
+
+# Subject names
+with open('config/subjects.json') as file:
+    subject_dict = json.loads(file.read())
 
 # Credentials
 school_name = None
@@ -72,7 +77,6 @@ def authenticate():
         print("STATUS: " + str(token_request.status_code))
         if token_request.status_code == 500:
             print("SomToday internal server error!")
-            sendNotification("Status 500!", "Server error!")
             quit()
         elif token_request.status_code == 200:
             token_json = json.loads(token_request.text)
@@ -81,7 +85,7 @@ def authenticate():
             refresh_token = token_json["refresh_token"]
             endpoint = token_json["somtoday_api_url"]
             access_header = {"Authorization": "Bearer " +
-                                   access_token, "Accept": "application/json"}
+                             access_token, "Accept": "application/json"}
             is_authenticated = True
         else:
             is_authenticated = False
@@ -97,7 +101,7 @@ def authenticate():
         refresh_token = token_json["refresh_token"]
         endpoint = token_json["somtoday_api_url"]
         access_header = {"Authorization": "Bearer " +
-                               access_token, "Accept": "application/json"}
+                         access_token, "Accept": "application/json"}
         is_authenticated = True
     if is_authenticated == False:
         print("Couldnt get the acces token!")
@@ -131,8 +135,10 @@ def datetime_to_string(date_time):
 
 
 def string_to_datetime(string):
-    return datetime.datetime.strptime(string, "%Y-%m-%dT%H:%M")
+    return datetime.strptime(string, "%Y-%m-%dT%H:%M")
 
+def html_to_markdown(html):
+    return html2text.html2text(html)
 
 def remove_html(text):
     clean = re.compile('<.*?>')
@@ -156,48 +162,39 @@ def get_grade_updates():
     print("Getting grades..")
     grades_header = {"Authorization": "Bearer " +
                      access_token,
-                     "Range": "items=0-100",
                      "Accept": "application/json"}
     grades_request = requests.get(
-        endpoint + "/rest/v1/resultaten", headers=grades_header)
+        endpoint + "/rest/v1/resultaten", headers=access_header)
 
     grades_json = json.loads(grades_request.text)
-
+    # Currently the response is an 403
+    # Something is wrong with the API idk
     print("Dumping the JSON grades output..")
     write_file(json.dumps(grades_json, indent=4),
                "data/somtoday_grades_output.json")
 
-    # grades = []
-    # # Work-in-progress
-    # class Grade:
-    #     def __init__(self):
-    #         super().__init__()
-
-    # for grade in gradesJson["items"]:
-    #     # print(grade["leerjaar"])
-    #     grades.append(Grade())
-
 class HomeworkItem:
-        def __init__(self, id, date_time, subject, abbreviation, homework_type, topic, description):
-            self.id = id
-            self.date_time = date_time
-            self.subject = subject
-            self.abbreviation = abbreviation
-            self.type = homework_type
-            self.topic = topic
-            self.description = description
+    def __init__(self, id, date_time, subject, abbreviation, homework_type, topic, description):
+        self.id = id
+        self.date_time = date_time
+        self.subject = subject
+        self.abbreviation = abbreviation
+        self.type = homework_type
+        self.topic = topic
+        self.description = description
 
-        def __eq__(self, other):
-            return (self.id == other.id)
+    def __eq__(self, other):
+        return (self.id == other.id)
 
 class ChangeType(Enum):
-        New = 1
-        Deleted = 2
+    NEW = 1
+    DELETED = 2
 
 class Update:
     def __init__(self, change_type, ref):
-        self.change_type = change_type
+        self.type = change_type
         self.ref = ref
+
 
 def get_homework_items(json_data):
     homework_items = []
@@ -205,7 +202,8 @@ def get_homework_items(json_data):
         homework_id = item["links"][0]["id"]
         if "datumTijd" in item:
             date_time_string = item["datumTijd"].split(".")[0]
-            date_time = datetime.strptime(date_time_string, "%Y-%m-%dT%H:%M:%S")
+            date_time = datetime.strptime(
+                date_time_string, "%Y-%m-%dT%H:%M:%S")
         else:
             date_time = "Week"
 
@@ -221,8 +219,84 @@ def get_homework_items(json_data):
         description = item["studiewijzerItem"]["omschrijving"]
 
         homework_items.append(HomeworkItem(homework_id, date_time,
-                                          subject, abbreviation, homework_type, topic, description))
-    return homework_items;
+                                           subject, abbreviation, homework_type, topic, description))
+    return homework_items
+
+
+def detect_homework_updates(old_items, new_items, date):
+    found_changes = False
+    updates = []
+
+    # Check for new homework
+    for item in new_items:
+        if item not in old_items:
+            found_changes = True
+            updates.append(Update(ChangeType.NEW, item))
+
+    # Check for deleted homework
+    for item in old_items:
+        if item.date_time.date() >= date:  # Only after specified date
+            if item not in new_items:
+                found_changes = True
+                updates.append(Update(ChangeType.DELETED, item))
+    return found_changes, updates
+
+def create_homework_fields(homework_item):
+    fields = {}
+    fields["Datum"] = homework_item.date_time.strftime("%d-%m-%Y")
+    fields["Tijd"] = homework_item.date_time.strftime("%H:%M")
+    subject_short = homework_item.abbreviation.lower()
+    if subject_short in subject_dict:
+        fields["Vak"] = subject_dict[subject_short];
+    else:
+        fields["Vak"] = homework_item.subject
+
+    fields["Type"] = homework_item.type.lower().capitalize()
+
+    return fields
+
+def homework_subjects(homework_list):
+    all_subjects = []
+    for item in homework_list:
+        all_subjects.append(item.abbreviation.lower())
+    short_subjects = list(dict.fromkeys(all_subjects))
+    subject_names = []
+    for short_subject in short_subjects:
+        if short_subject in subject_dict:
+            subject_names.append(subject_dict[short_subject])
+        else:
+            subject_names.append(short_subject.upper())
+    subject_names = sorted(subject_names)
+    return ', '.join(subject_names)
+
+def notify_updates(updates):
+    new_items = []
+    deleted_items = []
+
+    for update in updates:
+        if update.type == ChangeType.NEW:
+            new_items.append(update.ref)
+        elif update.type == ChangeType.DELETED:
+            deleted_items.append(update.ref)
+    
+    cards = []
+
+    PREFIX = "**Van de vakken:** "
+    SUFFIX = "\n\n_Zie https://somtoday.nl/ voor meer info_"
+
+    if len(new_items) <= 3:
+        for item in new_items:
+            cards.append(notifier.NotificationCard("**Nieuw:** __{}__".format(item.topic), html_to_markdown(item.description), create_homework_fields(item)))
+    else:
+        cards.append(notifier.NotificationCard("{}x niew huiswerk!".format(len(new_items)), PREFIX + homework_subjects(new_items) + SUFFIX, None))
+    
+    if len(deleted_items) <= 3:
+        for item in deleted_items:
+            cards.append(notifier.NotificationCard("**Verwijderd:** __{}__".format(item.topic), html_to_markdown(item.description), create_homework_fields(item)))
+    else:
+        cards.append(notifier.NotificationCard("{}x verwijderd huiswerk!".format(len(deleted_items)), PREFIX + homework_subjects(new_items) + SUFFIX, None))
+
+    notifier.notify(notifier.Notification("Er zijn veranderingen aan het huiswerk!", cards), "Somtoday")
 
 def get_homework_updates():
     today = datetime.now().date()
@@ -242,7 +316,7 @@ def get_homework_updates():
     # write_json_list_file(appt_hw_items, "data/somtoday_appointment_homework.json")
     # write_json_list_file(daily_hw_items, "data/somtoday_daily_homework.json")
     # write_json_list_file(weekly_hw_items, "data/somtoday_weekly_homework.json")
-    
+
     print("Done! Detecting changes (DISABLED)")
 
     homework_items = []
@@ -250,48 +324,23 @@ def get_homework_updates():
     homework_items.extend(daily_hw_items)
     homework_items.sort(key=lambda x: x.date_time)
 
-    # Detect changes TODO
-    # oldHomeworkJson = read_json_file("data/somtoday_homework.json")
-    # if oldHomeworkJson != None:
-    #     oldHomeWorkItems = []
-    #     for homeworkItem in oldHomeworkJson:
-    #         oldHomeWorkItems.append(HomeworkItem(homeworkItem["id"], datetime.strptime(homeworkItem["dateTime"], "%Y-%m-%d %H:%M"), homeworkItem["subject"], homeworkItem["abbreviation"],
-    #                                              homeworkItem["homeworkType"], homeworkItem["topic"], homeworkItem["description"]))
-    #     homeworkUpdates = []
-    #     newCount = 0
-    #     deletedCount = 0
+    # Detect changes
+    old_homework_json = read_json_file("data/somtoday_homework.json")
+    if old_homework_json != None:
+        old_homework_items = []
+        for item in old_homework_json:
+            old_homework_items.append(HomeworkItem(item["id"], string_to_datetime(
+                item["date_time"]), item["subject"], item["abbreviation"], item["type"], item["topic"], item["description"]))
 
-    #     # Check for new homework
-    #     for item in homeworkItems:
-    #         if item not in oldHomeWorkItems:
-    #             newCount += 1
-    #             homeworkUpdates.append(Update(ChangeType.New, item))
+        found_changes, updates = detect_homework_updates(
+            old_homework_items, homework_items, today)
 
-    #     # Check for deleted homework
-    #     for item in oldHomeWorkItems:
-    #         if item.dateTime.date() >= today:
-    #             if item not in homeworkItems:
-    #                 deletedCount += 1
-    #                 homeworkUpdates.append(Update(ChangeType.Deleted, item))
-
-    #     if newCount > 0:
-    #         sendNotification(str(newCount) + "x nieuw huiswerk!", "")
-    #         for update in homeworkUpdates:
-    #             item = update.ref
-    #             if update.changeType == ChangeType.New:
-    #                 print(
-    #                     "📝 - [" + item.abbreviation.upper() + "] - " + item.topic + item.description)
-    #     if deletedCount > 0:
-    #         sendNotification(str(deletedCount) + "x verwijderd huiswerk!", "")
-    #         # for update in homeworkUpdates:
-    #         #     print("Homework update: " + update.changeType.name)
-    #         #     item = update.ref
-    #         #     if update.changeType == ChangeType.New:
-    #         #         sendNotification(
-    #         #             "📝 - [" + item.abbreviation.upper() + "] - " + item.topic, item.description)
-    #         #     elif update.changeType == ChangeType.Deleted:
-    #         #         sendNotification("🗑 - [" + item.abbreviation.upper() +
-    #         #                         "] - Huiswerk verwijderd!",  item.topic + " Is verwijderd!")
+        if found_changes:
+            print("Updated, found {} homework updates! Sending notifications..".format(
+                len(updates)))
+            notify_updates(updates)
+        else:
+            print("Updated, no changes found.")
 
     write_json_list_file(homework_items, "data/somtoday_homework.json")
 
