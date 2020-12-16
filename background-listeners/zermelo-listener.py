@@ -21,11 +21,11 @@ WEEKDAY_ABBREVIATIONS = {
 }
 
 FETCH_DAYS = 10  # Delete known days when decreasing the ammount
-sync_delay = 30
+sync_interval = 30
 
 with open('config/settings.json') as settings_file:
     settings_json = json.load(settings_file)
-    sync_delay = int(settings_json["sync_delay"])
+    sync_interval = int(settings_json["sync_interval"])
 
 with open('config/subjects.json') as file:
     subject_dict = json.loads(file.read())
@@ -230,7 +230,7 @@ def get_group_ids():
     if len(group_ids) > 0:
         print("Group IDs: {}".format(group_ids))
     else:
-        notifier.notify_error("Couldn't find the group IS(s)!",
+        notifier.notify_error("Couldn't find the group ID(s)!",
                               "Groups names: {}".format(group_names))
 
 
@@ -473,7 +473,7 @@ def update():
 
 update()
 scheduler = BlockingScheduler()
-scheduler.add_job(update, "interval", seconds=sync_delay)
+scheduler.add_job(update, "interval", seconds=sync_interval)
 print("Updating schedule changes every " +
-      str(sync_delay) + " seconds..")
+      str(sync_interval) + " seconds..")
 scheduler.start()
