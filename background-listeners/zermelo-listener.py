@@ -376,7 +376,7 @@ def notify_updates(updates):
 
 
 def get_schedule_updates():
-    today = datetime.date.today() - timedelta(days=4)
+    today = datetime.date.today()
     start_date = today
     end_date = today + timedelta(days=FETCH_DAYS)
     timestamp_start = str(int(time.mktime(start_date.timetuple())))
