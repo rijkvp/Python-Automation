@@ -57,6 +57,7 @@ access_token = None
 refresh_token = None
 endpoint = None
 access_header = None
+student_id = None
 
 
 def authenticate():
@@ -161,6 +162,14 @@ def get_dow_name(dayOfWeek):
     return days.get(dayOfWeek)
 
 
+def get_student_id():
+    students_request = requests.get(
+        endpoint + "/rest/v1/leerlingen", headers=access_header)
+    students_json = json.loads(students_request.text)
+    global student_id
+    student_id = students_json["items"][0]["links"][0]["id"]
+
+
 class Grade:
     def __init__(self, id, grade, weight, description, subject):
         self.id = id
@@ -170,26 +179,22 @@ class Grade:
         self.subject = subject
 
 
-def get_grade_updates():
-    print("Getting grades..")
-
-    pupils_request = requests.get(
-        endpoint + "/rest/v1/leerlingen", headers=access_header)
-    pupils_json = json.loads(pupils_request.text)
-    pupil_id = pupils_json["items"][0]["links"][0]["id"]
-    print("Pupil ID: " + str(pupil_id))
-
-    write_file(pupils_request.text, "data/somtoday_pupils_output.json")
-
-    grades_url = endpoint + "/rest/v1/resultaten/huidigVoorLeerling/" + str(pupil_id)
-    grades_request = requests.get(grades_url, headers=access_header)
+def get_grade_items():
+    grades_header = {"Authorization": "Bearer " +
+                     access_token, "Accept": "application/json",
+                     # Range is probably not needed
+                     # "range": "items=0-99"
+                     }
+    grades_url = endpoint + "/rest/v1/resultaten/huidigVoorLeerling/" + str(student_id)
+    grades_request = requests.get(grades_url, headers=grades_header)
 
     grades_json = json.loads(grades_request.text)
-    print("Dumping the JSON grades output..")
     write_file(json.dumps(grades_json, indent=4),
                "data/somtoday_grades_output.json")
 
-    grades = []
+    print("Got {} grade items..".format(len(grades_json["items"])))
+
+    grade_items = []
 
     for grade_json in grades_json["items"]:
         if grade_json["type"] == "Toetskolom":
@@ -200,9 +205,16 @@ def get_grade_updates():
             else:
                 weight = None
             description = grade_json["omschrijving"] if "omschrijving" in grade_json else None
-            grades.append(Grade(grade_json["links"][0]["id"], grade_json["resultaat"], weight,
-                            description, grade_json["vak"]["afkorting"]))
-    
+            grade_items.append(Grade(grade_json["links"][0]["id"], grade_json["resultaat"], weight,
+                                     description, grade_json["vak"]["afkorting"]))
+
+    return grade_items
+
+
+def get_grade_updates():
+    print("Getting grades..")
+
+    grades = get_grade_items()
     write_json_list_file(grades, "data/somtoday_grades.json")
 
 
@@ -231,7 +243,7 @@ class Update:
         self.ref = ref
 
 
-def get_homework_items(json_data):
+def convert_homework_items(json_data):
     homework_items = []
     for item in json_data["items"]:
         homework_id = item["links"][0]["id"]
@@ -348,10 +360,10 @@ def get_homework_updates():
 
     appt_hw_data = requests.get(
         endpoint + "/rest/v1/studiewijzeritemafspraaktoekenningen?begintNaOfOp=" + today_string, headers=access_header).text
-    appt_hw_items = get_homework_items(json.loads(appt_hw_data))
+    appt_hw_items = convert_homework_items(json.loads(appt_hw_data))
     daily_hw_data = requests.get(
         endpoint + "/rest/v1/studiewijzeritemdagtoekenningen?begintNaOfOp=" + today_string, headers=access_header).text
-    daily_hw_items = get_homework_items(json.loads(daily_hw_data))
+    daily_hw_items = convert_homework_items(json.loads(daily_hw_data))
 
     homework_items = []
     homework_items.extend(appt_hw_items)
@@ -382,6 +394,7 @@ def get_homework_updates():
 def update():
     authenticate()
 
+    get_student_id()
     get_grade_updates()
     get_homework_updates()
 
