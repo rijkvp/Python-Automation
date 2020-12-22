@@ -1,2 +1,0 @@
-stop.bat
-start.bat

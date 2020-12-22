@@ -4,6 +4,7 @@ import json
 from datetime import datetime, timedelta
 import os
 import re
+from time import sleep
 from enum import Enum
 import notifier
 import html2text
@@ -137,8 +138,10 @@ def datetime_to_string(date_time):
 def string_to_datetime(string):
     return datetime.strptime(string, "%Y-%m-%dT%H:%M")
 
+
 def html_to_markdown(html):
     return html2text.html2text(html)
+
 
 def remove_html(text):
     clean = re.compile('<.*?>')
@@ -158,20 +161,50 @@ def get_dow_name(dayOfWeek):
     return days.get(dayOfWeek)
 
 
+class Grade:
+    def __init__(self, id, grade, weight, description, subject):
+        self.id = id
+        self.grade = grade
+        self.weight = weight
+        self.description = description
+        self.subject = subject
+
+
 def get_grade_updates():
     print("Getting grades..")
-    grades_header = {"Authorization": "Bearer " +
-                     access_token,
-                     "Accept": "application/json"}
-    grades_request = requests.get(
-        endpoint + "/rest/v1/resultaten", headers=access_header)
+
+    pupils_request = requests.get(
+        endpoint + "/rest/v1/leerlingen", headers=access_header)
+    pupils_json = json.loads(pupils_request.text)
+    pupil_id = pupils_json["items"][0]["links"][0]["id"]
+    print("Pupil ID: " + str(pupil_id))
+
+    write_file(pupils_request.text, "data/somtoday_pupils_output.json")
+
+    grades_url = endpoint + "/rest/v1/resultaten/huidigVoorLeerling/" + str(pupil_id)
+    grades_request = requests.get(grades_url, headers=access_header)
 
     grades_json = json.loads(grades_request.text)
-    # Currently the response is an 403
-    # Something is wrong with the API idk
     print("Dumping the JSON grades output..")
     write_file(json.dumps(grades_json, indent=4),
                "data/somtoday_grades_output.json")
+
+    grades = []
+
+    for grade_json in grades_json["items"]:
+        if grade_json["type"] == "Toetskolom":
+            if "weging" in grade_json:
+                weight = grade_json["weging"]
+            elif "examenWeging" in grade_json:
+                weight = str(grade_json["examenWeging"]) + " SE"
+            else:
+                weight = None
+            description = grade_json["omschrijving"] if "omschrijving" in grade_json else None
+            grades.append(Grade(grade_json["links"][0]["id"], grade_json["resultaat"], weight,
+                            description, grade_json["vak"]["afkorting"]))
+    
+    write_json_list_file(grades, "data/somtoday_grades.json")
+
 
 class HomeworkItem:
     def __init__(self, id, date_time, subject, abbreviation, homework_type, topic, description):
@@ -186,9 +219,11 @@ class HomeworkItem:
     def __eq__(self, other):
         return (self.id == other.id)
 
+
 class ChangeType(Enum):
     NEW = 1
     DELETED = 2
+
 
 class Update:
     def __init__(self, change_type, ref):
@@ -241,19 +276,21 @@ def detect_homework_updates(old_items, new_items, date):
                 updates.append(Update(ChangeType.DELETED, item))
     return found_changes, updates
 
+
 def create_homework_fields(homework_item):
     fields = {}
     fields["Datum"] = homework_item.date_time.strftime("%d-%m-%Y")
     fields["Tijd"] = homework_item.date_time.strftime("%H:%M")
     subject_short = homework_item.abbreviation.lower()
     if subject_short in subject_dict:
-        fields["Vak"] = subject_dict[subject_short];
+        fields["Vak"] = subject_dict[subject_short]
     else:
         fields["Vak"] = homework_item.subject
 
     fields["Type"] = homework_item.type.lower().capitalize()
 
     return fields
+
 
 def homework_subjects(homework_list):
     all_subjects = []
@@ -269,6 +306,7 @@ def homework_subjects(homework_list):
     subject_names = sorted(subject_names)
     return ', '.join(subject_names)
 
+
 def notify_updates(updates):
     new_items = []
     deleted_items = []
@@ -278,7 +316,7 @@ def notify_updates(updates):
             new_items.append(update.ref)
         elif update.type == ChangeType.DELETED:
             deleted_items.append(update.ref)
-    
+
     cards = []
 
     PREFIX = "**Van de vakken:** "
@@ -286,17 +324,23 @@ def notify_updates(updates):
 
     if len(new_items) <= 3:
         for item in new_items:
-            cards.append(notifier.NotificationCard("**Nieuw:** __{}__".format(item.topic), html_to_markdown(item.description), create_homework_fields(item)))
+            cards.append(notifier.NotificationCard("**Nieuw:** __{}__".format(item.topic),
+                                                   html_to_markdown(item.description), create_homework_fields(item)))
     else:
-        cards.append(notifier.NotificationCard("{}x niew huiswerk!".format(len(new_items)), PREFIX + homework_subjects(new_items) + SUFFIX, None))
-    
+        cards.append(notifier.NotificationCard("{}x niew huiswerk!".format(
+            len(new_items)), PREFIX + homework_subjects(new_items) + SUFFIX, None))
+
     if len(deleted_items) <= 3:
         for item in deleted_items:
-            cards.append(notifier.NotificationCard("**Verwijderd:** __{}__".format(item.topic), html_to_markdown(item.description), create_homework_fields(item)))
+            cards.append(notifier.NotificationCard("**Verwijderd:** __{}__".format(
+                item.topic), html_to_markdown(item.description), create_homework_fields(item)))
     else:
-        cards.append(notifier.NotificationCard("{}x verwijderd huiswerk!".format(len(deleted_items)), PREFIX + homework_subjects(new_items) + SUFFIX, None))
+        cards.append(notifier.NotificationCard("{}x verwijderd huiswerk!".format(
+            len(deleted_items)), PREFIX + homework_subjects(new_items) + SUFFIX, None))
 
-    notifier.notify(notifier.Notification("Er zijn veranderingen aan het huiswerk!", cards), "Somtoday")
+    notifier.notify(notifier.Notification(
+        "Er zijn veranderingen aan het huiswerk!", cards), "Somtoday")
+
 
 def get_homework_updates():
     today = datetime.now().date()
@@ -308,16 +352,6 @@ def get_homework_updates():
     daily_hw_data = requests.get(
         endpoint + "/rest/v1/studiewijzeritemdagtoekenningen?begintNaOfOp=" + today_string, headers=access_header).text
     daily_hw_items = get_homework_items(json.loads(daily_hw_data))
-    # weekly_hw_data = requests.get(
-    #     endpoint + "/rest/v1/studiewijzeritemweektoekenningen?begintNaOfOp=" + today_string, headers=access_header).text
-    # weekly_hw_items = get_homework_items(json.loads(weekly_hw_data))
-
-    # print("Dumping homework json...")
-    # write_json_list_file(appt_hw_items, "data/somtoday_appointment_homework.json")
-    # write_json_list_file(daily_hw_items, "data/somtoday_daily_homework.json")
-    # write_json_list_file(weekly_hw_items, "data/somtoday_weekly_homework.json")
-
-    print("Done! Detecting changes (DISABLED)")
 
     homework_items = []
     homework_items.extend(appt_hw_items)
