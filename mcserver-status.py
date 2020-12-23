@@ -1,7 +1,6 @@
 from mcstatus import MinecraftServer
 from apscheduler.schedulers.blocking import BlockingScheduler
 from plyer import notification
-from threading import Thread
 import json
 import notifier
 
@@ -27,7 +26,8 @@ with open('config/mc_servers.json') as config_file:
 
 
 def send_notification(title, fields):
-    notifier.notify(title, fields, "Minecraft")
+    notification = notifier.Notification(title, [notifier.NotificationCard(title, "-", fields)])
+    notifier.notify(notification, "Minecraft")
 
 def ping_servers():
     for server_info in servers:
@@ -74,6 +74,7 @@ def ping_servers():
 
 
 if len(servers) > 0:
+    ping_servers()
     scheduler = BlockingScheduler()
     scheduler.add_job(ping_servers, "interval", seconds=sync_interval)
     print("Pinging your minecraft servers every " +
