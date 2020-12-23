@@ -1,10 +1,10 @@
+from os.path import join
 from apscheduler.schedulers.blocking import BlockingScheduler
 import requests
 import json
-from datetime import datetime, timedelta
+from datetime import datetime
 import os
 import re
-from time import sleep
 from enum import Enum
 import notifier
 import html2text
@@ -12,6 +12,11 @@ import html2text
 BASE_URL = "https://production.somtoday.nl"
 
 sync_interval = 30
+
+# Make sure folders exist
+os.makedirs("config", exist_ok=True)
+os.makedirs("data", exist_ok=True)
+
 with open('config/settings.json') as settings_file:
     settings_json = json.load(settings_file)
     sync_interval = int(settings_json["sync_interval"])
@@ -126,7 +131,6 @@ def write_file(text, filePath):
 
 
 def write_json_list_file(listData, filePath):
-    os.makedirs("data", exist_ok=True)
     jsonText = json.dumps([ob.__dict__ for ob in listData],
                           indent=4, default=datetime_to_string)
     write_file(jsonText, filePath)
@@ -161,6 +165,11 @@ def get_dow_name(dayOfWeek):
     }
     return days.get(dayOfWeek)
 
+def get_subject_name(subject):
+    if subject.lower() in subject_dict:
+        return subject_dict[subject.lower()]
+    else:
+        return subject
 
 def get_student_id():
     students_request = requests.get(
@@ -169,6 +178,15 @@ def get_student_id():
     global student_id
     student_id = students_json["items"][0]["links"][0]["id"]
 
+class ChangeType(Enum):
+    NEW = 1
+    DELETED = 2
+
+
+class Update:
+    def __init__(self, change_type, ref):
+        self.type = change_type
+        self.ref = ref
 
 class Grade:
     def __init__(self, id, grade, weight, description, subject):
@@ -178,6 +196,8 @@ class Grade:
         self.description = description
         self.subject = subject
 
+    def __eq__(self, other):
+        return (self.id == other.id)
 
 def get_grade_items():
     grades_header = {"Authorization": "Bearer " +
@@ -192,7 +212,6 @@ def get_grade_items():
     write_file(json.dumps(grades_json, indent=4),
                "data/somtoday_grades_output.json")
 
-    print("Got {} grade items..".format(len(grades_json["items"])))
 
     grade_items = []
 
@@ -208,13 +227,83 @@ def get_grade_items():
             grade_items.append(Grade(grade_json["links"][0]["id"], grade_json["resultaat"], weight,
                                      description, grade_json["vak"]["afkorting"]))
 
+    print("Got {} valid grades with {} items in total..".format(len(grade_items), len(grades_json["items"])))
     return grade_items
 
 
-def get_grade_updates():
-    print("Getting grades..")
+def detect_grade_updates(old_items, new_items):
+    found_changes = False
+    updates = []
 
+    for item in new_items:
+        if item not in old_items:
+            found_changes = True
+            updates.append(Update(ChangeType.NEW, item))
+
+    return found_changes, updates
+
+def create_grade_fields(grade):
+    fields = {}
+    fields["Cijfer"] = grade.grade
+    fields["Weging"] = grade.weight
+    fields["Omschrijving"] = grade.description
+    fields["Vak"] = get_subject_name(grade.subject)
+
+    return fields
+
+def format_grade_list(items):
+    grades_list = []
+    for grade in items:
+        grades_list.append("{} voor {} ({}x)".format(grade.grade, get_subject_name(grade.subject), grade.weight))
+
+    return ", ".join(grades_list)
+
+def notify_grade_updates(updates):
+    new_items = []
+    deleted_items = []
+
+    for update in updates:
+        if update.type == ChangeType.NEW:
+            new_items.append(update.ref)
+        elif update.type == ChangeType.DELETED:
+            deleted_items.append(update.ref)
+
+    cards = []
+
+    PREFIX = "**Cijfers:** "
+    SUFFIX = "\n\n_Zie https://somtoday.nl/ voor meer info_"
+
+    if len(new_items) <= 10:
+        for item in new_items:
+            cards.append(notifier.NotificationCard("**__{}__** voor {}!".format(item.grade, get_subject_name(item.subject)),
+                                                   html_to_markdown(item.description), create_grade_fields(item)))
+    else:
+        cards.append(notifier.NotificationCard("{} nieuwe cijfers!".format(
+            len(new_items)), PREFIX + format_grade_list(new_items) + SUFFIX, None))
+
+
+    notifier.notify(notifier.Notification(
+        "Er zijn nieuwe cijfers!", cards), "Somtoday-Grades")
+
+def get_grade_updates():
     grades = get_grade_items()
+
+    # Detect changes
+    old_grade_json = read_json_file("data/somtoday_grades.json")
+    if old_grade_json != None:
+        old_grades = []
+        for grade in old_grade_json:
+            old_grades.append(Grade(
+                grade["id"], grade["grade"], grade["weight"], grade["description"], grade["subject"]))
+
+        found_changes, updates = detect_grade_updates(old_grades, grades)
+
+        if found_changes:
+            print("Updated, found {} grade updates! Sending notifications..".format(len(updates)))
+            notify_grade_updates(updates)
+        else:
+            print("Updated grades, no changes found.")
+
     write_json_list_file(grades, "data/somtoday_grades.json")
 
 
@@ -230,18 +319,6 @@ class HomeworkItem:
 
     def __eq__(self, other):
         return (self.id == other.id)
-
-
-class ChangeType(Enum):
-    NEW = 1
-    DELETED = 2
-
-
-class Update:
-    def __init__(self, change_type, ref):
-        self.type = change_type
-        self.ref = ref
-
 
 def convert_homework_items(json_data):
     homework_items = []
@@ -288,17 +365,11 @@ def detect_homework_updates(old_items, new_items, date):
                 updates.append(Update(ChangeType.DELETED, item))
     return found_changes, updates
 
-
 def create_homework_fields(homework_item):
     fields = {}
     fields["Datum"] = homework_item.date_time.strftime("%d-%m-%Y")
     fields["Tijd"] = homework_item.date_time.strftime("%H:%M")
-    subject_short = homework_item.abbreviation.lower()
-    if subject_short in subject_dict:
-        fields["Vak"] = subject_dict[subject_short]
-    else:
-        fields["Vak"] = homework_item.subject
-
+    fields["Vak"] = get_subject_name(homework_item.subject)
     fields["Type"] = homework_item.type.lower().capitalize()
 
     return fields
@@ -319,7 +390,7 @@ def homework_subjects(homework_list):
     return ', '.join(subject_names)
 
 
-def notify_updates(updates):
+def notify_homework_updates(updates):
     new_items = []
     deleted_items = []
 
@@ -334,15 +405,15 @@ def notify_updates(updates):
     PREFIX = "**Van de vakken:** "
     SUFFIX = "\n\n_Zie https://somtoday.nl/ voor meer info_"
 
-    if len(new_items) <= 3:
+    if len(new_items) <= 4:
         for item in new_items:
             cards.append(notifier.NotificationCard("**Nieuw:** __{}__".format(item.topic),
                                                    html_to_markdown(item.description), create_homework_fields(item)))
     else:
-        cards.append(notifier.NotificationCard("{}x niew huiswerk!".format(
+        cards.append(notifier.NotificationCard("{}x nieuw huiswerk!".format(
             len(new_items)), PREFIX + homework_subjects(new_items) + SUFFIX, None))
 
-    if len(deleted_items) <= 3:
+    if len(deleted_items) <= 4:
         for item in deleted_items:
             cards.append(notifier.NotificationCard("**Verwijderd:** __{}__".format(
                 item.topic), html_to_markdown(item.description), create_homework_fields(item)))
@@ -351,7 +422,7 @@ def notify_updates(updates):
             len(deleted_items)), PREFIX + homework_subjects(new_items) + SUFFIX, None))
 
     notifier.notify(notifier.Notification(
-        "Er zijn veranderingen aan het huiswerk!", cards), "Somtoday")
+        "Er zijn veranderingen aan het huiswerk!", cards), "Somtoday-Homework")
 
 
 def get_homework_updates():
@@ -384,9 +455,9 @@ def get_homework_updates():
         if found_changes:
             print("Updated, found {} homework updates! Sending notifications..".format(
                 len(updates)))
-            notify_updates(updates)
+            notify_homework_updates(updates)
         else:
-            print("Updated, no changes found.")
+            print("Updated homework, no changes found.")
 
     write_json_list_file(homework_items, "data/somtoday_homework.json")
 

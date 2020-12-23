@@ -5,12 +5,11 @@ from threading import Thread
 import json
 import notifier
 
-sync_delay = 30
+sync_interval = 30
 
 with open('config/settings.json') as settings_file:
     settings_json = json.load(settings_file)
-    sync_delay = int(settings_json["sync_delay"])
-
+    sync_interval = int(settings_json["sync_interval"])
 
 class ServerInfo:
     def __init__(self, ip):
@@ -76,9 +75,9 @@ def ping_servers():
 
 if len(servers) > 0:
     scheduler = BlockingScheduler()
-    scheduler.add_job(ping_servers, "interval", seconds=sync_delay)
+    scheduler.add_job(ping_servers, "interval", seconds=sync_interval)
     print("Pinging your minecraft servers every " +
-          str(sync_delay) + " seconds..")
+          str(sync_interval) + " seconds..")
     scheduler.start()
 else:
     print("Quitting - No servers defined in mc_servers.json.")
