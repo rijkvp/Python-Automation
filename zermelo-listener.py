@@ -46,10 +46,12 @@ def load_credentials():
     global auth_code
     global endpoint
     global group_names
+    global group_ids
     global website
     with open('config/zermelo_credentials.json') as config_file:
         config_json = json.load(config_file)
         group_names = config_json["group_names"]
+        group_ids = config_json["group_ids"]
         organization = config_json["organization"]
         # Remove the spaces from code (useful for copying)
         auth_code = config_json["auth_code"].replace(" ", "")
@@ -388,9 +390,13 @@ def get_schedule_updates():
 
     for id in group_ids:
         new_appointments = get_appointments(id, timestamp_start, timestamp_end)
-        if not new_appointments:
-            print("\nSomething went wrong while fetching the appointments!")
+        if len(new_appointments) == 0:
+            print("Didn't find any appointments for the next {} days..".format(FETCH_DAYS))
             return
+        elif not new_appointments:
+            print("Didn't get any data! Something went wrong while fetching the appointments!")
+            return
+
         appointments.extend(new_appointments)
 
     appointments = sorted(appointments)

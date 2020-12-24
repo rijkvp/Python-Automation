@@ -7,6 +7,7 @@ A bundle of python scripts that run on the background and notify me about update
 ## Notifications
 
 `notifier.py` will send notifications in 3 different ways:
+
 - Console output.
 - OS Notifications using the [plyer](https://pypi.org/project/plyer/) package.
 - Discord Webhooks.
@@ -35,3 +36,9 @@ These are all python packages from [PyPI](https://pypi.org):
 - apscheduler
 - html2text
 - mcstatus
+
+## Config files
+
+To make the scripts work you need to provide some information config files:
+
+**TODO:** Add config info

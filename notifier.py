@@ -125,5 +125,3 @@ def notify_error(title, message):
     print("\n[CONSOLE ERROR MESSAGE]")
     print(title)
     print(message)
-
-    send_os_notification(title, message, "Error")
