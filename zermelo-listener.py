@@ -27,15 +27,26 @@ FETCH_DAYS = 10
 
 sync_interval = 30
 
+# Make sure the folders exist
+os.makedirs("config", exist_ok=True)
+os.makedirs("data", exist_ok=True)
+
 with open('config/settings.json') as settings_file:
     settings_json = json.load(settings_file)
     sync_interval = int(settings_json["sync_interval"])
 
-with open('config/subjects.json') as file:
-    subject_dict = json.loads(file.read())
-with open('config/teachers.json') as file:
-    teacher_dict = json.loads(file.read())
+if os.path.exists('config/subjects.json'):
+    with open('config/subjects.json') as file:
+        subject_dict = json.loads(file.read())
+else:
+    subject_dict = None
 
+if os.path.exists('config/teachers.json'):
+    with open('config/teachers.json') as file:
+        teacher_dict = json.loads(file.read())
+else:
+    teacher_dict = None
+    
 organization = None
 auth_code = None
 endpoint = None
@@ -164,7 +175,7 @@ def authenticate():
         expiration_time = datetime.datetime.now() + timedelta(seconds=expiration_delay)
         print("Expires on: " + datetime_to_string(expiration_time))
 
-        os.makedirs("data", exist_ok=True)
+        
         with open("data/zermelo_access_token.json", "w") as file:
             access_token_json = {
                 "access_token": access_token,
@@ -221,7 +232,6 @@ def get_group_ids():
 
     groups_json = groups_response.json()['response']['data']
 
-    os.makedirs("data", exist_ok=True)
     with open("data/zermelo_groups_dump.json", "w+") as f:
         f.write(json.dumps(groups_json, default=datetime_to_string))
 
@@ -421,7 +431,6 @@ def get_schedule_updates():
     known_dates = []
     if os.path.exists("data/zermelo_appointments.json"):
         found_changes = False
-        os.makedirs("data", exist_ok=True)
 
         if os.path.exists("data/zermelo_known_dates.json"):
             with open("data/zermelo_known_dates.json", "r") as f:
@@ -450,7 +459,6 @@ def get_schedule_updates():
             print("Updated, no changes found.")
 
     # Save new json
-    os.makedirs("data", exist_ok=True)
     appointment_json = json.dumps(
         [a.as_dict() for a in appointments])
     with open("data/zermelo_appointments.json", "w+") as f:

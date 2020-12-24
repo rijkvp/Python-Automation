@@ -21,9 +21,11 @@ with open('config/settings.json') as settings_file:
     settings_json = json.load(settings_file)
     sync_interval = int(settings_json["sync_interval"])
 
-# Subject names
-with open('config/subjects.json') as file:
-    subject_dict = json.loads(file.read())
+if os.path.exists('config/subjects.json'):
+    with open('config/subjects.json') as file:
+        subject_dict = json.loads(file.read())
+else:
+    subject_dict = None
 
 # Credentials
 school_name = None

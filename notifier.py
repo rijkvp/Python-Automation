@@ -28,7 +28,7 @@ class Notification:
         self.title = message
         self.cards = cards
 
-with open("config/notification_settings.json") as config_file:
+with open("config/notifications.json") as config_file:
     config_json = json.load(config_file)
     send_os_notifications = config_json["send_os_notifications"]
     send_discord_messages = config_json["send_discord_messages"]
