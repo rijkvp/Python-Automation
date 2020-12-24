@@ -20,7 +20,11 @@ WEEKDAY_ABBREVIATIONS = {
     6: "Zo"
 }
 
-FETCH_DAYS = 10  # Delete known days when decreasing the ammount
+# The amount of days to look into the future
+# WARNING: Delete the known days file when decreasing the ammount! Otherwise the program thinks the appointments are cancelled
+FETCH_DAYS = 10
+
+
 sync_interval = 30
 
 with open('config/settings.json') as settings_file:
@@ -41,6 +45,7 @@ group_ids = None
 expiration_time = None
 website = None
 
+
 def load_credentials():
     global organization
     global auth_code
@@ -51,7 +56,8 @@ def load_credentials():
     with open('config/zermelo_credentials.json') as config_file:
         config_json = json.load(config_file)
         group_names = config_json["group_names"]
-        group_ids = config_json["group_ids"]
+        if "group_ids" in config_json:
+            group_ids = config_json["group_ids"]
         organization = config_json["organization"]
         # Remove the spaces from code (useful for copying)
         auth_code = config_json["auth_code"].replace(" ", "")
@@ -219,21 +225,19 @@ def get_group_ids():
     with open("data/zermelo_groups_dump.json", "w+") as f:
         f.write(json.dumps(groups_json, default=datetime_to_string))
 
+    print("No group id's specified. Searching for group id's with group names: {}".format(
+        group_names))
     group_ids = []
-    found_group_names = []
     for item in groups_json:
         for group_name in group_names:
-            if group_name in found_group_names:  # Only use the first group id found
-                continue
             if item["name"] == group_name and item["isMentorGroup"] and item["isMainGroup"]:
                 group_ids.append(item["id"])
-                found_group_names.append(group_name)
 
     if len(group_ids) > 0:
-        print("Group IDs: {}".format(group_ids))
+        print("Found {} group IDs: {}".format(len(group_ids), group_ids))
     else:
         notifier.notify_error("Couldn't find the group ID(s)!",
-                              "Groups names: {}".format(group_names))
+                              "The groups names are: {}".format(group_names))
 
 
 class Appointment:
@@ -388,16 +392,25 @@ def get_schedule_updates():
         date_to_string(today), date_to_string(end_date)))
     appointments = []
 
+    multiple_groups = len(group_ids) > 1
+
     for id in group_ids:
         new_appointments = get_appointments(id, timestamp_start, timestamp_end)
-        if len(new_appointments) == 0:
-            print("Didn't find any appointments for the next {} days..".format(FETCH_DAYS))
+        if new_appointments == None:
+            print(
+                "Didn't get any data! Something went wrong while fetching the appointments!")
             return
-        elif not new_appointments:
-            print("Didn't get any data! Something went wrong while fetching the appointments!")
+        elif len(new_appointments) == 0:
+            print(
+                "Didn't find any appointments for the next {} days..".format(FETCH_DAYS))
             return
 
-        appointments.extend(new_appointments)
+        if multiple_groups:
+            for new_item in new_appointments:
+                if not new_item in appointments:
+                    appointments.append(new_item)
+        else:
+            appointments.extend(new_appointments)
 
     appointments = sorted(appointments)
 
