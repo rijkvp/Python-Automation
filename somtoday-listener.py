@@ -4,7 +4,6 @@ import requests
 import json
 from datetime import datetime
 import os
-import re
 from enum import Enum
 import notifier
 import html2text
@@ -145,15 +144,8 @@ def datetime_to_string(date_time):
 def string_to_datetime(string):
     return datetime.strptime(string, "%Y-%m-%dT%H:%M")
 
-
 def html_to_markdown(html):
     return html2text.html2text(html)
-
-
-def remove_html(text):
-    clean = re.compile('<.*?>')
-    return re.sub(clean, '', text)
-
 
 def get_dow_name(dayOfWeek):
     days = {
@@ -172,10 +164,6 @@ def get_subject_name(subject):
         return subject_dict[subject.lower()]
     else:
         return subject
-
-# Removes parts between : in a string
-def remove_discord_emoji(string):
-    return re.sub("\s*:[^:]*:\s*", "", string)
 
 def get_student_id():
     students_request = requests.get(
@@ -262,7 +250,7 @@ def format_grade_list(items, remove_emoji = False, short = False):
         if not short:
             subject_name = get_subject_name(grade.subject)
             if remove_emoji:
-                subject_name = remove_discord_emoji(subject_name)
+                subject_name = notifier.remove_discord_emoji(subject_name)
         else:
             subject_name = grade.subject.upper()
         if not short:
@@ -298,7 +286,7 @@ def notify_grade_updates(updates):
 
     if len(new_items) == 1:
         new_grade = new_items[0]
-        short_title = "{} gehaald voor {} ({}x)!".format(new_grade.grade, remove_discord_emoji(get_subject_name(new_grade.subject)), new_grade.weight)
+        short_title = "{} gehaald voor {} ({}x)!".format(new_grade.grade, notifier.remove_discord_emoji(get_subject_name(new_grade.subject)), new_grade.weight)
         short_description = new_grade.description
     else:
         short_title = "{} nieuwe cijfers!".format(len(new_items))
@@ -449,7 +437,7 @@ def notify_homework_updates(updates):
         title_parts.append("{}x verwijderd".format(len(deleted_items)))
     
     short_title = "Huiswerk: " + ", ".join(title_parts)
-    subject_names = [remove_discord_emoji(s) for s in homework_subjects(get_update_refs(updates))]
+    subject_names = [notifier.remove_discord_emoji(s) for s in homework_subjects(get_update_refs(updates))]
     short_description = "Van: " + ", ".join(subject_names) + "."
 
     notifier.notify(notifier.Notification(

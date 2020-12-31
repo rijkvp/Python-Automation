@@ -1,8 +1,8 @@
 import plyer
 import requests
 import json
-import datetime
 import textwrap
+import re
 
 send_os_notifications = False
 send_discord_messages = False
@@ -41,6 +41,10 @@ with open("config/notifications.json") as config_file:
 
 def validate_text(string, max_length):
     return textwrap.shorten(string, width=max_length, placeholder="...")
+
+# Removes parts between : in a string
+def remove_discord_emoji(string):
+    return re.sub("\s*:[^:]*:\s*", "", string)
 
 # Send an OS notification using the plyer package
 def send_os_notification(notification, context_name):
@@ -103,18 +107,18 @@ def send_discord_notification(notification, webhook_name):
 def cards_to_string(cards):
     string = ""
     for card in cards:
-        if card.title is not None:
-            string += card.title + " "
-        if card.description is not None:
-            string += card.description + " "
+        if card.title is not None and card.title is not "":
+            string += card.title + "\n"
+        if card.description is not None and card.description is not "":
+            string += card.description + "\n"
         if card.fields is not None:
             for name, value in card.fields.items():
-                string += str(name) + ": " + str(value) + " "
+                string += str(name) + ": " + remove_discord_emoji(str(value)) + " "
 
     return string
 
 def send_console_notification(notification, context_name):
-    print("\n[" + notification.title + "] (" + context_name + ")")
+    print("\n[" + remove_discord_emoji(notification.title) + "] (" + context_name + ")")
     message = cards_to_string(notification.cards)
     print(message)
 
