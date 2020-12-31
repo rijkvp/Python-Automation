@@ -8,6 +8,8 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 from datetime import timedelta
 import operator
 import notifier
+import textwrap
+import math
 
 # The dutch weekday abbreviations
 WEEKDAY_ABBREVIATIONS = {
@@ -350,16 +352,25 @@ def detect_appointment_updates(old_appts, new_appts, known_dates):
 
     return found_updates, updates
 
+def get_subject_abbrev_from_updates(updates):
+    subject_abbrevs = []
+    for u in updates:
+        if u.type == ChangeType.CANCELLED:
+            subject_abbrevs.extend(u.old_appointment.subjects)
+        elif u.type == ChangeType.NEW  or u.type == ChangeType.CHANGED:
+            subject_abbrevs.extend(u.new_appointment.subjects)
+    subject_abbrevs = [s.upper() for s in subject_abbrevs]
+    return subject_abbrevs
 
 def notify_updates(updates):
-    new_updates = []
     cancelled_updates = []
+    new_updates = []
     changed_updates = []
     for update in updates:
-        if update.type == ChangeType.NEW:
-            new_updates.append(update)
-        elif update.type == ChangeType.CANCELLED:
+        if update.type == ChangeType.CANCELLED:
             cancelled_updates.append(update)
+        elif update.type == ChangeType.NEW:
+            new_updates.append(update)
         elif update.type == ChangeType.CHANGED:
             changed_updates.append(update)
 
@@ -386,8 +397,32 @@ def notify_updates(updates):
         cards.append(notifier.NotificationCard("Er zijn {} lessen zijn aangepast:".format(len(
             changed_updates)), "**Van de vakken:** " + format_subject_list([u.new_appointment.subjects for u in changed_updates]) + "\n\n_Zie " + website + " voor meer info_", None))
 
+    title_parts = []
+    cancel_desc = ""
+    new_desc = ""
+    change_desc = ""
+    DESC_SEPERATOR = ". "
+
+    if len(cancelled_updates) > 0:
+        title_parts.append("{}x uitval".format(len(cancelled_updates)))
+        cancel_desc = "➖ " + ", ".join(get_subject_abbrev_from_updates(cancelled_updates)) + DESC_SEPERATOR
+    if len(new_updates) > 0:
+        title_parts.append("{}x toegevoegd".format(len(new_updates)))
+        new_desc = "➕ " + ", ".join(get_subject_abbrev_from_updates(new_updates)) + DESC_SEPERATOR
+    if len(changed_updates) > 0:
+        title_parts.append("{}x aangepast".format(len(changed_updates)))
+        change_desc = "❔ " + ", ".join(get_subject_abbrev_from_updates(changed_updates)) + DESC_SEPERATOR
+    
+    part_len = math.floor((64.0 - len(DESC_SEPERATOR) - 2.0) / len(title_parts))
+    cancel_desc = textwrap.shorten(cancel_desc, width=part_len, placeholder="..")
+    new_desc = textwrap.shorten(new_desc, width=part_len, placeholder="..")
+    change_desc = textwrap.shorten(change_desc, width=part_len, placeholder="..")
+    
+    short_title = "Rooster: ".format(len(updates)) + ", ".join(title_parts)
+    short_desc = cancel_desc + new_desc + change_desc
+
     update_notification = notifier.Notification(
-        "Het zermelo rooster is gewijzigd:", cards)
+        "Er zijn {} roosterwijzigingen".format(len(updates)), cards, short_title, short_desc)
     notifier.notify(update_notification, "Zermelo")
 
 

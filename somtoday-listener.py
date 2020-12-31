@@ -79,15 +79,15 @@ def authenticate():
             "scope": "openid"}
     acces_headers = {
         "Authorization": "Basic RDUwRTBDMDYtMzJEMS00QjQxLUExMzctQTlBODUwQzg5MkMyOnZEZFdkS3dQTmFQQ3loQ0RoYUNuTmV5ZHlMeFNHTkpY", "Accept": "application/json"}
-
+    token_request = None
     if access_token == None:
         token_request = requests.post(
             BASE_URL + "/oauth2/token", data=data, headers=acces_headers)
-        print("STATUS: " + str(token_request.status_code))
         if token_request.status_code == 500:
-            print("SomToday internal server error!")
+            print("Unable to authenticate! Are the servers down?! Response: 500")
             quit()
         elif token_request.status_code == 200:
+            print("Successfully logged in!")
             token_json = json.loads(token_request.text)
 
             access_token = token_json["access_token"]
@@ -112,8 +112,8 @@ def authenticate():
         access_header = {"Authorization": "Bearer " +
                          access_token, "Accept": "application/json"}
         is_authenticated = True
-    if is_authenticated == False:
-        print("Couldnt get the acces token!")
+    if is_authenticated == False and token_request is not None:
+        print("Unable to authenticate! Are your credentials right? {} {}".format(token_request.status_code, token_request.reason))
 
 
 def read_json_file(filePath):
@@ -173,6 +173,10 @@ def get_subject_name(subject):
     else:
         return subject
 
+# Removes parts between : in a string
+def remove_discord_emoji(string):
+    return re.sub("\s*:[^:]*:\s*", "", string)
+
 def get_student_id():
     students_request = requests.get(
         endpoint + "/rest/v1/leerlingen", headers=access_header)
@@ -183,7 +187,6 @@ def get_student_id():
 class ChangeType(Enum):
     NEW = 1
     DELETED = 2
-
 
 class Update:
     def __init__(self, change_type, ref):
@@ -253,12 +256,22 @@ def create_grade_fields(grade):
 
     return fields
 
-def format_grade_list(items):
+def format_grade_list(items, remove_emoji = False, short = False):
     grades_list = []
     for grade in items:
-        grades_list.append("{} voor {} ({}x)".format(grade.grade, get_subject_name(grade.subject), grade.weight))
+        if not short:
+            subject_name = get_subject_name(grade.subject)
+            if remove_emoji:
+                subject_name = remove_discord_emoji(subject_name)
+        else:
+            subject_name = grade.subject.upper()
+        if not short:
+            seperator = "voor"
+        else:
+            seperator = "→"
+        grades_list.append("{} {} {} ({}x)".format(grade.grade, seperator, subject_name, grade.weight))
 
-    return ", ".join(grades_list)
+    return grades_list
 
 def notify_grade_updates(updates):
     new_items = []
@@ -281,11 +294,19 @@ def notify_grade_updates(updates):
                                                    html_to_markdown(item.description), create_grade_fields(item)))
     else:
         cards.append(notifier.NotificationCard("{} nieuwe cijfers!".format(
-            len(new_items)), PREFIX + format_grade_list(new_items) + SUFFIX, None))
+            len(new_items)), PREFIX + ", ".join(format_grade_list(new_items)) + SUFFIX, None))
 
+    if len(new_items) == 1:
+        new_grade = new_items[0]
+        short_title = "{} gehaald voor {} ({}x)!".format(new_grade.grade, remove_discord_emoji(get_subject_name(new_grade.subject)), new_grade.weight)
+        short_description = new_grade.description
+    else:
+        short_title = "{} nieuwe cijfers!".format(len(new_items))
+        short = len(new_items) > 2
+        short_description = ", ".join(format_grade_list(new_items, True, short)) + "."
 
     notifier.notify(notifier.Notification(
-        "Er zijn nieuwe cijfers!", cards), "Somtoday-Grades")
+        "Er zijn nieuwe cijfers!", cards, short_title, short_description), "Somtoday-Grades")
 
 def get_grade_updates():
     grades = get_grade_items()
@@ -376,21 +397,19 @@ def create_homework_fields(homework_item):
 
     return fields
 
-
 def homework_subjects(homework_list):
     all_subjects = []
     for item in homework_list:
         all_subjects.append(item.abbreviation.lower())
-    short_subjects = list(dict.fromkeys(all_subjects))
+    subject_abbrevs = list(dict.fromkeys(all_subjects))
     subject_names = []
-    for short_subject in short_subjects:
-        if short_subject in subject_dict:
-            subject_names.append(subject_dict[short_subject])
-        else:
-            subject_names.append(short_subject.upper())
+    for abbrev in subject_abbrevs:
+        subject_names.append(get_subject_name(abbrev))
     subject_names = sorted(subject_names)
-    return ', '.join(subject_names)
+    return subject_names
 
+def get_update_refs(updates):
+    return [u.ref for u in updates]
 
 def notify_homework_updates(updates):
     new_items = []
@@ -413,7 +432,7 @@ def notify_homework_updates(updates):
                                                    html_to_markdown(item.description), create_homework_fields(item)))
     else:
         cards.append(notifier.NotificationCard("{}x nieuw huiswerk!".format(
-            len(new_items)), PREFIX + homework_subjects(new_items) + SUFFIX, None))
+            len(new_items)), PREFIX + ', '.join(homework_subjects(new_items)) + SUFFIX, None))
 
     if len(deleted_items) <= 4:
         for item in deleted_items:
@@ -421,10 +440,20 @@ def notify_homework_updates(updates):
                 item.topic), html_to_markdown(item.description), create_homework_fields(item)))
     else:
         cards.append(notifier.NotificationCard("{}x verwijderd huiswerk!".format(
-            len(deleted_items)), PREFIX + homework_subjects(new_items) + SUFFIX, None))
+            len(deleted_items)), PREFIX + ', '.join(homework_subjects(new_items)) + SUFFIX, None))
+
+    title_parts = []
+    if len(new_items) > 0:
+        title_parts.append("{}x nieuw".format(len(new_items)))
+    if len(deleted_items) > 0:
+        title_parts.append("{}x verwijderd".format(len(deleted_items)))
+    
+    short_title = "Huiswerk: " + ", ".join(title_parts)
+    subject_names = [remove_discord_emoji(s) for s in homework_subjects(get_update_refs(updates))]
+    short_description = "Van: " + ", ".join(subject_names) + "."
 
     notifier.notify(notifier.Notification(
-        "Er zijn veranderingen aan het huiswerk!", cards), "Somtoday-Homework")
+        "Er zijn veranderingen aan het huiswerk!", cards, short_title, short_description), "Somtoday-Homework")
 
 
 def get_homework_updates():

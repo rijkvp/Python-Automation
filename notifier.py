@@ -24,9 +24,11 @@ class NotificationCard:
         self.fields = fields
 
 class Notification:
-    def __init__ (self, message, cards):
-        self.title = message
+    def __init__ (self, title, cards, short_title, short_description):
+        self.title = title
         self.cards = cards
+        self.short_title = short_title
+        self.short_description = short_description
 
 with open("config/notifications.json") as config_file:
     config_json = json.load(config_file)
@@ -44,8 +46,8 @@ def validate_text(string, max_length):
 def send_os_notification(notification, context_name):
     if not send_os_notifications:
         return
-    title_short = validate_text(notification.title, 64)
-    message_short = validate_text(cards_to_string(notification.cards), 64)
+    title_short = validate_text(notification.short_title, 64)
+    message_short = validate_text(notification.short_description, 64)
     plyer.notification.notify(title=title_short, message=message_short, app_name=context_name, app_icon="config/notification_icon.ico")
 
 def send_discord_notification(notification, webhook_name):
