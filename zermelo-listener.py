@@ -418,7 +418,7 @@ def notify_updates(updates):
     new_desc = textwrap.shorten(new_desc, width=part_len, placeholder="..")
     change_desc = textwrap.shorten(change_desc, width=part_len, placeholder="..")
     
-    short_title = "Rooster: ".format(len(updates)) + ", ".join(title_parts)
+    short_title = "Rooster: " + ", ".join(title_parts)
     short_desc = cancel_desc + new_desc + change_desc
 
     update_notification = notifier.Notification(
