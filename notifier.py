@@ -67,11 +67,11 @@ def send_discord_notification(notification, webhook_name):
                 for card in notification.cards:
                     embed = {}
                     embed["color"] = 15158332
-                    if card.title is not None:
+                    if card.title != None:
                         embed["title"] = card.title
-                    if card.description is not None:
+                    if card.description != None:
                         embed["description"] = card.description
-                    if card.fields is not None:
+                    if card.fields != None:
                         embed_fields = []
                         for name, value in card.fields.items():
                             embed_fields.append({
@@ -107,11 +107,11 @@ def send_discord_notification(notification, webhook_name):
 def cards_to_string(cards):
     string = ""
     for card in cards:
-        if card.title is not None and card.title is not "":
+        if card.title != None and card.title != "":
             string += card.title + "\n"
-        if card.description is not None and card.description is not "":
+        if card.description != None and card.description != "":
             string += card.description + "\n"
-        if card.fields is not None:
+        if card.fields != None:
             for name, value in card.fields.items():
                 string += str(name) + ": " + remove_discord_emoji(str(value)) + " "
 

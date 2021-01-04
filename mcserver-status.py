@@ -4,8 +4,11 @@ from plyer import notification
 import json
 import notifier
 
-sync_interval = 10
+sync_interval = 30
 
+with open('config/settings.json') as settings_file:
+    settings_json = json.load(settings_file)
+    sync_interval = int(settings_json["sync_interval"])
 
 class ServerInfo:
     def __init__(self, ip, name):
