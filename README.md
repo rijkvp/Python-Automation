@@ -36,6 +36,7 @@ These are all python packages from [PyPI](https://pypi.org):
 - apscheduler
 - html2text
 - mcstatus
+- plyer
 
 ## Config files
 
