@@ -147,6 +147,11 @@ def datetime_to_string(date_time):
 def string_to_datetime(string):
     return datetime.strptime(string, "%Y-%m-%dT%H:%M")
 
+def export_grades_csv(grades):
+    csv_str = ""
+    for grade in grades:
+        csv_str += "{};{};{};{}\n".format(datetime_to_string(grade.date_time), grade.grade, grade.weight, grade.subject)
+    write_file(csv_str, "data/grades_output.csv")
 
 def html_to_markdown(html):
     return html2text.html2text(html)
@@ -192,12 +197,13 @@ class Update:
 
 
 class Grade:
-    def __init__(self, id, grade, weight, description, subject):
+    def __init__(self, id, grade, weight, description, subject, date_time):
         self.id = id
         self.grade = grade
         self.weight = weight
         self.description = description
         self.subject = subject
+        self.date_time = date_time
 
     def __eq__(self, other):
         return (self.id == other.id)
@@ -227,9 +233,11 @@ def get_grade_items():
                 weight = str(grade_json["examenWeging"]) + " SE"
             else:
                 weight = None
+            timeSplit = grade_json["datumInvoer"].split(".")[0]
+            dateTime = datetime.strptime(timeSplit, "%Y-%m-%dT%H:%M:%S")
             description = grade_json["omschrijving"] if "omschrijving" in grade_json else None
             grade_items.append(Grade(grade_json["links"][0]["id"], grade_json["resultaat"], weight,
-                                     description, grade_json["vak"]["afkorting"]))
+                                     description, grade_json["vak"]["afkorting"], dateTime))
 
     print("Got {} valid grades with {} items in total..".format(
         len(grade_items), len(grades_json["items"])))
@@ -324,7 +332,7 @@ def get_grade_updates():
         old_grades = []
         for grade in old_grade_json:
             old_grades.append(Grade(
-                grade["id"], grade["grade"], grade["weight"], grade["description"], grade["subject"]))
+                grade["id"], grade["grade"], grade["weight"], grade["description"], grade["subject"], string_to_datetime(grade["date_time"])))
 
         found_changes, updates = detect_grade_updates(old_grades, grades)
 
@@ -335,6 +343,7 @@ def get_grade_updates():
         else:
             print("Updated grades, no changes found.")
 
+    export_grades_csv(grades)
     write_json_list_file(grades, "data/somtoday_grades.json")
 
 
