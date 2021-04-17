@@ -75,16 +75,16 @@ def authenticate():
     data = {"grant_type": "password",
             "username": school_uuid + "\\" + username,
             "password": password,
-            "scope": "openid"}
-    acces_headers = {
-        "Authorization": "Basic RDUwRTBDMDYtMzJEMS00QjQxLUExMzctQTlBODUwQzg5MkMyOnZEZFdkS3dQTmFQQ3loQ0RoYUNuTmV5ZHlMeFNHTkpY", "Accept": "application/json"}
+            "scope": "openid",
+            "client_id": "D50E0C06-32D1-4B41-A137-A9A850C892C2"}
+
+    access_headers = {"Accept": "application/json"}
     token_request = None
     if access_token == None:
         token_request = requests.post(
-            BASE_URL + "/oauth2/token", data=data, headers=acces_headers)
+            BASE_URL + "/oauth2/token", data=data, headers=access_headers)
         if token_request.status_code == 500:
             print("Unable to authenticate! Are the servers down?! Response: 500")
-            quit()
         elif token_request.status_code == 200:
             print("Successfully logged in!")
             token_json = json.loads(token_request.text)
@@ -98,21 +98,24 @@ def authenticate():
         else:
             is_authenticated = False
     if refresh_token != None and not is_authenticated:
-        print("Refreshing the token..")
-        data = {"grant_type": "refresh_token",
-                "refresh_token": refresh_token}
-        refresh_request = requests.post(
-            BASE_URL + "/oauth2/token", data=data, headers=acces_headers)
-        token_json = json.loads(refresh_request.text)
+        None
+        # print("Refreshing the token..")
+        # data = {"grant_type": "refresh_token",
+        #         "refresh_token": refresh_token}
+        # refresh_request = requests.post(
+        #     BASE_URL + "/oauth2/token", data=data, headers=access_headers)
+        # token_json = json.loads(refresh_request.text)
 
-        access_token = token_json["access_token"]
-        refresh_token = token_json["refresh_token"]
-        endpoint = token_json["somtoday_api_url"]
-        access_header = {"Authorization": "Bearer " +
-                         access_token, "Accept": "application/json"}
-        is_authenticated = True
+        # access_token = token_json["access_token"]
+        # refresh_token = token_json["refresh_token"]
+        # endpoint = token_json["somtoday_api_url"]
+        # access_header = {"Authorization": "Bearer " +
+        #                  access_token, "Accept": "application/json"}
+        # is_authenticated = True
     if is_authenticated == False and token_request is not None:
-        print("Unable to authenticate! Are your credentials right? {} {}".format(token_request.status_code, token_request.reason))
+        print("\nFailed to authenticate! Are your credentials right?\n\n{} - {}\n{}".format(
+            token_request.status_code, token_request.reason, token_request.text))
+        exit()
 
 
 def read_json_file(filePath):
@@ -144,8 +147,10 @@ def datetime_to_string(date_time):
 def string_to_datetime(string):
     return datetime.strptime(string, "%Y-%m-%dT%H:%M")
 
+
 def html_to_markdown(html):
     return html2text.html2text(html)
+
 
 def get_dow_name(dayOfWeek):
     days = {
@@ -159,11 +164,13 @@ def get_dow_name(dayOfWeek):
     }
     return days.get(dayOfWeek)
 
+
 def get_subject_name(subject):
     if subject.lower() in subject_dict:
         return subject_dict[subject.lower()]
     else:
         return subject
+
 
 def get_student_id():
     students_request = requests.get(
@@ -172,14 +179,17 @@ def get_student_id():
     global student_id
     student_id = students_json["items"][0]["links"][0]["id"]
 
+
 class ChangeType(Enum):
     NEW = 1
     DELETED = 2
+
 
 class Update:
     def __init__(self, change_type, ref):
         self.type = change_type
         self.ref = ref
+
 
 class Grade:
     def __init__(self, id, grade, weight, description, subject):
@@ -192,19 +202,20 @@ class Grade:
     def __eq__(self, other):
         return (self.id == other.id)
 
+
 def get_grade_items():
     grades_header = {"Authorization": "Bearer " +
                      access_token, "Accept": "application/json",
                      # Range is probably not needed
                      # "range": "items=0-99"
                      }
-    grades_url = endpoint + "/rest/v1/resultaten/huidigVoorLeerling/" + str(student_id)
+    grades_url = endpoint + \
+        "/rest/v1/resultaten/huidigVoorLeerling/" + str(student_id)
     grades_request = requests.get(grades_url, headers=grades_header)
 
     grades_json = json.loads(grades_request.text)
     write_file(json.dumps(grades_json, indent=4),
                "data/somtoday_grades_output.json")
-
 
     grade_items = []
 
@@ -220,7 +231,8 @@ def get_grade_items():
             grade_items.append(Grade(grade_json["links"][0]["id"], grade_json["resultaat"], weight,
                                      description, grade_json["vak"]["afkorting"]))
 
-    print("Got {} valid grades with {} items in total..".format(len(grade_items), len(grades_json["items"])))
+    print("Got {} valid grades with {} items in total..".format(
+        len(grade_items), len(grades_json["items"])))
     return grade_items
 
 
@@ -235,6 +247,7 @@ def detect_grade_updates(old_items, new_items):
 
     return found_changes, updates
 
+
 def create_grade_fields(grade):
     fields = {}
     fields["Cijfer"] = grade.grade
@@ -244,7 +257,8 @@ def create_grade_fields(grade):
 
     return fields
 
-def format_grade_list(items, remove_emoji = False, short = False):
+
+def format_grade_list(items, remove_emoji=False, short=False):
     grades_list = []
     for grade in items:
         if not short:
@@ -257,9 +271,11 @@ def format_grade_list(items, remove_emoji = False, short = False):
             seperator = "voor"
         else:
             seperator = "→"
-        grades_list.append("{} {} {} ({}x)".format(grade.grade, seperator, subject_name, grade.weight))
+        grades_list.append("{} {} {} ({}x)".format(
+            grade.grade, seperator, subject_name, grade.weight))
 
     return grades_list
+
 
 def notify_grade_updates(updates):
     new_items = []
@@ -286,15 +302,18 @@ def notify_grade_updates(updates):
 
     if len(new_items) == 1:
         new_grade = new_items[0]
-        short_title = "{} gehaald voor {} ({}x)!".format(new_grade.grade, notifier.remove_discord_emoji(get_subject_name(new_grade.subject)), new_grade.weight)
+        short_title = "{} gehaald voor {} ({}x)!".format(new_grade.grade, notifier.remove_discord_emoji(
+            get_subject_name(new_grade.subject)), new_grade.weight)
         short_description = new_grade.description
     else:
         short_title = "{} nieuwe cijfers!".format(len(new_items))
         short = len(new_items) > 2
-        short_description = ", ".join(format_grade_list(new_items, True, short)) + "."
+        short_description = ", ".join(
+            format_grade_list(new_items, True, short)) + "."
 
     notifier.notify(notifier.Notification(
         "Er zijn nieuwe cijfers!", cards, short_title, short_description), "Somtoday-Grades")
+
 
 def get_grade_updates():
     grades = get_grade_items()
@@ -310,7 +329,8 @@ def get_grade_updates():
         found_changes, updates = detect_grade_updates(old_grades, grades)
 
         if found_changes:
-            print("Updated, found {} grade updates! Sending notifications..".format(len(updates)))
+            print("Updated, found {} grade updates! Sending notifications..".format(
+                len(updates)))
             notify_grade_updates(updates)
         else:
             print("Updated grades, no changes found.")
@@ -330,6 +350,7 @@ class HomeworkItem:
 
     def __eq__(self, other):
         return (self.id == other.id)
+
 
 def convert_homework_items(json_data):
     homework_items = []
@@ -376,6 +397,7 @@ def detect_homework_updates(old_items, new_items, date):
                 updates.append(Update(ChangeType.DELETED, item))
     return found_changes, updates
 
+
 def create_homework_fields(homework_item):
     fields = {}
     fields["Datum"] = homework_item.date_time.strftime("%d-%m-%Y")
@@ -384,6 +406,7 @@ def create_homework_fields(homework_item):
     fields["Type"] = homework_item.type.lower().capitalize()
 
     return fields
+
 
 def homework_subjects(homework_list):
     all_subjects = []
@@ -396,8 +419,10 @@ def homework_subjects(homework_list):
     subject_names = sorted(subject_names)
     return subject_names
 
+
 def get_update_refs(updates):
     return [u.ref for u in updates]
+
 
 def notify_homework_updates(updates):
     new_items = []
@@ -435,9 +460,10 @@ def notify_homework_updates(updates):
         title_parts.append("{}x nieuw".format(len(new_items)))
     if len(deleted_items) > 0:
         title_parts.append("{}x verwijderd".format(len(deleted_items)))
-    
+
     short_title = "Huiswerk: " + ", ".join(title_parts)
-    subject_names = [notifier.remove_discord_emoji(s) for s in homework_subjects(get_update_refs(updates))]
+    subject_names = [notifier.remove_discord_emoji(
+        s) for s in homework_subjects(get_update_refs(updates))]
     short_description = "Van: " + ", ".join(subject_names) + "."
 
     notifier.notify(notifier.Notification(

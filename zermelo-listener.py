@@ -57,7 +57,7 @@ group_names = None
 group_ids = None
 expiration_time = None
 website = None
-
+notify_changes = None
 
 def load_credentials():
     global organization
@@ -66,6 +66,8 @@ def load_credentials():
     global group_names
     global group_ids
     global website
+    global notify_changes
+
     with open('config/zermelo_credentials.json') as config_file:
         config_json = json.load(config_file)
         group_names = config_json["group_names"]
@@ -74,6 +76,7 @@ def load_credentials():
         organization = config_json["organization"]
         # Remove the spaces from code (useful for copying)
         auth_code = config_json["auth_code"].replace(" ", "")
+        notify_changes = config_json["notify_changes"]
     endpoint = "https://{}.zportal.nl/api/v3/".format(organization)
     website = "https://{}.zportal.nl".format(organization)
 
@@ -372,7 +375,10 @@ def notify_updates(updates):
         elif update.type == ChangeType.NEW:
             new_updates.append(update)
         elif update.type == ChangeType.CHANGED:
-            changed_updates.append(update)
+            if notify_changes:
+                changed_updates.append(update)
+            else:
+                print("Ignored changed appointment.")
 
     cards = []
     if len(cancelled_updates) <= 3:
@@ -396,6 +402,9 @@ def notify_updates(updates):
     else:
         cards.append(notifier.NotificationCard("Er zijn {} lessen zijn aangepast:".format(len(
             changed_updates)), "**Van de vakken:** " + format_subject_list([u.new_appointment.subjects for u in changed_updates]) + "\n\n_Zie " + website + " voor meer info_", None))
+
+    if len(cards) == 0:
+        return
 
     title_parts = []
     cancel_desc = ""
