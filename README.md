@@ -26,7 +26,7 @@ Notifies about new homework & grades in [Somtoday](https://som.today/). Somtoday
 
 - `mcserver-status.py`
 
-Notifies you about minecraft server status changes. Usefull if your friends are manually hosting their servers and you want to know when they are online.
+Notifies you about minecraft server status changes. Useful if your friends are manually hosting their servers and you want to know when they are online.
 
 ## Dependencies
 
